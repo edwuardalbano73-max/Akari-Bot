@@ -1,0 +1,13 @@
+{
+  "name": "akari-bot",
+  "version": "1.0.0",
+  "description": "Akari Bot - Discord Anime Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.24.2",
+    "express": "^5.1.0"
+  }
+}

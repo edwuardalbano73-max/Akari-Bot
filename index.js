@@ -35,6 +35,9 @@ const PREFIX = "M";
 const PORT = process.env.PORT || 3000;
 const TOKEN = process.env.DISCORD_TOKEN;
 
+// 🔐 Clave para conectar Akari Web con Akari Bot
+const BOT_API_KEY = process.env.BOT_API_KEY;
+
 const DATA_FILE = path.join(__dirname, "akari-data.json");
 
 // =====================================================
@@ -86,7 +89,6 @@ function defaultGuildConfig() {
         },
 
         economy: {
-
             work: {
                 time: 30 * 60 * 1000,
                 min: 300,
@@ -116,7 +118,6 @@ function defaultGuildConfig() {
 }
 
 function getGuildConfig(guildId) {
-
     if (!data.guilds[guildId]) {
         data.guilds[guildId] =
             defaultGuildConfig();
@@ -132,13 +133,11 @@ function getGuildConfig(guildId) {
 // =====================================================
 
 function getUser(userId, guildId) {
-
     if (!data.users[guildId]) {
         data.users[guildId] = {};
     }
 
     if (!data.users[guildId][userId]) {
-
         data.users[guildId][userId] = {
             money: 0,
 
@@ -146,7 +145,8 @@ function getUser(userId, guildId) {
                 work: 0,
                 slut: 0,
                 crime: 0,
-                rob: 0
+                rob: 0,
+                daily: 0
             }
         };
     }
@@ -159,7 +159,6 @@ function getUser(userId, guildId) {
 // =====================================================
 
 function formatTime(ms) {
-
     if (ms <= 0) return "Ahora";
 
     let seconds = Math.ceil(ms / 1000);
@@ -178,6 +177,7 @@ function formatTime(ms) {
     if (days) parts.push(`${days}d`);
     if (hours) parts.push(`${hours}h`);
     if (minutes) parts.push(`${minutes}m`);
+
     if (seconds && parts.length < 3) {
         parts.push(`${seconds}s`);
     }
@@ -190,7 +190,6 @@ function formatTime(ms) {
 // =====================================================
 
 function randomMoney(min, max) {
-
     return Math.floor(
         Math.random() * (max - min + 1)
     ) + min;
@@ -201,7 +200,6 @@ function randomMoney(min, max) {
 // =====================================================
 
 function akariEmbed(title, description) {
-
     return new EmbedBuilder()
         .setColor("#ff9dcc")
         .setTitle(`🌸 ${title}`)
@@ -217,14 +215,11 @@ function akariEmbed(title, description) {
 // =====================================================
 
 client.on("guildMemberAdd", async member => {
-
     try {
-
         const config =
             getGuildConfig(member.guild.id);
 
         if (!config.welcome.enabled) return;
-
         if (!config.welcome.channel) return;
 
         const channel =
@@ -268,7 +263,6 @@ client.on("guildMemberAdd", async member => {
         });
 
     } catch (error) {
-
         console.log(
             "❌ Error en bienvenida:",
             error
@@ -283,7 +277,6 @@ client.on("guildMemberAdd", async member => {
 const inviteCache = new Map();
 
 client.once("ready", async () => {
-
     console.log(
         `🌸 ${client.user.tag} está conectado correctamente.`
     );
@@ -298,9 +291,7 @@ client.once("ready", async () => {
     });
 
     for (const guild of client.guilds.cache.values()) {
-
         try {
-
             const invites =
                 await guild.invites.fetch();
 
@@ -315,7 +306,6 @@ client.once("ready", async () => {
             );
 
         } catch (error) {
-
             console.log(
                 `⚠️ No se pudieron cargar invites de ${guild.name}.`
             );
@@ -323,12 +313,12 @@ client.once("ready", async () => {
     }
 });
 
-// Detectar invite utilizado
+// =====================================================
+// 💌 DETECTAR INVITE
+// =====================================================
 
 client.on("guildMemberAdd", async member => {
-
     try {
-
         const config =
             getGuildConfig(member.guild.id);
 
@@ -342,7 +332,6 @@ client.on("guildMemberAdd", async member => {
 
         const usedInvite =
             newInvites.find(invite => {
-
                 const oldUses =
                     oldInvites?.get(invite.code) || 0;
 
@@ -360,7 +349,6 @@ client.on("guildMemberAdd", async member => {
         );
 
         if (!usedInvite) return;
-
         if (!config.invites.channel) return;
 
         const channel =
@@ -402,7 +390,6 @@ client.on("guildMemberAdd", async member => {
         });
 
     } catch (error) {
-
         console.log(
             "❌ Error detectando invite:",
             error
@@ -415,14 +402,10 @@ client.on("guildMemberAdd", async member => {
 // =====================================================
 
 async function workCommand(message, config, user) {
-
     const now = Date.now();
-
-    const settings =
-        config.economy.work;
+    const settings = config.economy.work;
 
     if (user.cooldowns.work > now) {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -443,7 +426,6 @@ async function workCommand(message, config, user) {
         );
 
     user.money += amount;
-
     user.cooldowns.work =
         now + settings.time;
 
@@ -465,14 +447,10 @@ async function workCommand(message, config, user) {
 // =====================================================
 
 async function slutCommand(message, config, user) {
-
     const now = Date.now();
-
-    const settings =
-        config.economy.slut;
+    const settings = config.economy.slut;
 
     if (user.cooldowns.slut > now) {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -499,7 +477,6 @@ async function slutCommand(message, config, user) {
         now + settings.time;
 
     if (won) {
-
         user.money += amount;
 
         saveData();
@@ -517,7 +494,6 @@ async function slutCommand(message, config, user) {
         });
 
     } else {
-
         const loss =
             Math.min(
                 amount,
@@ -547,14 +523,10 @@ async function slutCommand(message, config, user) {
 // =====================================================
 
 async function crimeCommand(message, config, user) {
-
     const now = Date.now();
-
-    const settings =
-        config.economy.crime;
+    const settings = config.economy.crime;
 
     if (user.cooldowns.crime > now) {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -581,7 +553,6 @@ async function crimeCommand(message, config, user) {
         now + settings.time;
 
     if (won) {
-
         user.money += amount;
 
         saveData();
@@ -599,7 +570,6 @@ async function crimeCommand(message, config, user) {
         });
 
     } else {
-
         const loss =
             Math.min(
                 amount,
@@ -629,14 +599,10 @@ async function crimeCommand(message, config, user) {
 // =====================================================
 
 async function robCommand(message, config, user) {
-
     const now = Date.now();
-
-    const settings =
-        config.economy.rob;
+    const settings = config.economy.rob;
 
     if (user.cooldowns.rob > now) {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -657,7 +623,6 @@ async function robCommand(message, config, user) {
         settings.winChance;
 
     if (!won) {
-
         saveData();
 
         return message.reply({
@@ -695,7 +660,6 @@ async function robCommand(message, config, user) {
 // =====================================================
 
 async function balanceCommand(message, user) {
-
     return message.reply({
         embeds: [
             akariEmbed(
@@ -712,7 +676,6 @@ async function balanceCommand(message, user) {
 // =====================================================
 
 async function dailyCommand(message, user) {
-
     const now = Date.now();
 
     if (!user.cooldowns.daily) {
@@ -720,7 +683,6 @@ async function dailyCommand(message, user) {
     }
 
     if (user.cooldowns.daily > now) {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -759,18 +721,14 @@ async function dailyCommand(message, user) {
 // =====================================================
 
 function createHelpMenu() {
-
     return new ActionRowBuilder()
         .addComponents(
-
             new StringSelectMenuBuilder()
                 .setCustomId("akari_help")
                 .setPlaceholder(
                     "🌸 Selecciona una categoría"
                 )
-
                 .addOptions(
-
                     new StringSelectMenuOptionBuilder()
                         .setLabel("Economía")
                         .setDescription(
@@ -799,7 +757,6 @@ function createHelpMenu() {
 }
 
 function helpMainEmbed() {
-
     return akariEmbed(
         "Akari Bot — Ayuda 🌸",
         "Bienvenido/a al centro de ayuda de **Akari Bot**.\n\n" +
@@ -811,9 +768,7 @@ function helpMainEmbed() {
 }
 
 function helpCategoryEmbed(category) {
-
     if (category === "economia") {
-
         return akariEmbed(
             "Economía 💰",
             "**Mwork**\n" +
@@ -837,7 +792,6 @@ function helpCategoryEmbed(category) {
     }
 
     if (category === "informacion") {
-
         return akariEmbed(
             "Información 🌸",
             "**Mhelp**\n" +
@@ -852,7 +806,6 @@ function helpCategoryEmbed(category) {
     }
 
     if (category === "utilidades") {
-
         return akariEmbed(
             "Utilidades 🛠️",
             "**Mavatar**\n" +
@@ -867,11 +820,10 @@ function helpCategoryEmbed(category) {
 }
 
 // =====================================================
-// 🎮 INTERACCIONES DEL MENÚ
+// 🎮 INTERACCIONES
 // =====================================================
 
 client.on("interactionCreate", async interaction => {
-
     if (!interaction.isStringSelectMenu()) return;
 
     if (interaction.customId !== "akari_help") {
@@ -896,9 +848,7 @@ client.on("interactionCreate", async interaction => {
 // =====================================================
 
 client.on("messageCreate", async message => {
-
     if (message.author.bot) return;
-
     if (!message.guild) return;
 
     if (!message.content.startsWith(PREFIX)) {
@@ -927,12 +877,7 @@ client.on("messageCreate", async message => {
             message.guild.id
         );
 
-    // =================================================
-    // 🌸 HELP
-    // =================================================
-
     if (command === "help") {
-
         return message.reply({
             embeds: [
                 helpMainEmbed()
@@ -943,12 +888,7 @@ client.on("messageCreate", async message => {
         });
     }
 
-    // =================================================
-    // 💰 ECONOMÍA
-    // =================================================
-
     if (command === "work") {
-
         return workCommand(
             message,
             config,
@@ -957,7 +897,6 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "slut") {
-
         return slutCommand(
             message,
             config,
@@ -966,7 +905,6 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "crime") {
-
         return crimeCommand(
             message,
             config,
@@ -975,7 +913,6 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "rob") {
-
         return robCommand(
             message,
             config,
@@ -983,8 +920,10 @@ client.on("messageCreate", async message => {
         );
     }
 
-    if (command === "balance" || command === "bal") {
-
+    if (
+        command === "balance" ||
+        command === "bal"
+    ) {
         return balanceCommand(
             message,
             user
@@ -992,19 +931,13 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "daily") {
-
         return dailyCommand(
             message,
             user
         );
     }
 
-    // =================================================
-    // 🌸 INFORMACIÓN
-    // =================================================
-
     if (command === "bot") {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -1018,7 +951,6 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "server") {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -1030,12 +962,7 @@ client.on("messageCreate", async message => {
         });
     }
 
-    // =================================================
-    // 🛠️ UTILIDADES
-    // =================================================
-
     if (command === "ping") {
-
         return message.reply({
             embeds: [
                 akariEmbed(
@@ -1047,7 +974,6 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "avatar") {
-
         return message.reply({
             embeds: [
                 new EmbedBuilder()
@@ -1065,27 +991,450 @@ client.on("messageCreate", async message => {
 });
 
 // =====================================================
-// 🌐 SERVIDOR HTTP PARA RENDER
+// 🌐 API PARA AKARI WEB
 // =====================================================
 
 const app = express();
 
-app.get("/", (req, res) => {
+app.use(express.json());
 
+// -----------------------------------------------------
+// 🔐 Comprobar API KEY
+// -----------------------------------------------------
+
+function checkApiKey(req, res, next) {
+    if (!BOT_API_KEY) {
+        return res.status(500).json({
+            success: false,
+            message: "BOT_API_KEY no está configurada."
+        });
+    }
+
+    const auth =
+        req.headers.authorization || "";
+
+    const receivedKey =
+        auth.startsWith("Bearer ")
+            ? auth.slice(7)
+            : "";
+
+    if (
+        !receivedKey ||
+        receivedKey !== BOT_API_KEY
+    ) {
+        return res.status(401).json({
+            success: false,
+            message: "No autorizado."
+        });
+    }
+
+    next();
+}
+
+// -----------------------------------------------------
+// 🌸 Obtener servidor para la web
+// -----------------------------------------------------
+
+function getWebGuild() {
+    const guild =
+        client.guilds.cache.first();
+
+    if (!guild) return null;
+
+    return guild;
+}
+
+// -----------------------------------------------------
+// 📥 GET /api/config
+// -----------------------------------------------------
+
+app.get(
+    "/api/config",
+    checkApiKey,
+    (req, res) => {
+
+        const guild =
+            getWebGuild();
+
+        if (!guild) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    "Akari Bot todavía no está en ningún servidor."
+            });
+        }
+
+        const config =
+            getGuildConfig(guild.id);
+
+        res.json({
+            success: true,
+
+            guild: {
+                id: guild.id,
+                name: guild.name
+            },
+
+            economy: {
+                work: {
+                    time: config.economy.work.time,
+                    min: config.economy.work.min,
+                    max: config.economy.work.max
+                },
+
+                slut: {
+                    time: config.economy.slut.time,
+                    min: config.economy.slut.min,
+                    max: config.economy.slut.max,
+                    winChance:
+                        config.economy.slut.winChance
+                },
+
+                crime: {
+                    time: config.economy.crime.time,
+                    min: config.economy.crime.min,
+                    max: config.economy.crime.max,
+                    winChance:
+                        config.economy.crime.winChance
+                },
+
+                rob: {
+                    time: config.economy.rob.time,
+                    winChance:
+                        config.economy.rob.winChance
+                }
+            }
+        });
+    }
+);
+
+// -----------------------------------------------------
+// 📤 POST /api/config
+// -----------------------------------------------------
+
+app.post(
+    "/api/config",
+    checkApiKey,
+    (req, res) => {
+
+        const guild =
+            getWebGuild();
+
+        if (!guild) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    "Akari Bot todavía no está en ningún servidor."
+            });
+        }
+
+        const config =
+            getGuildConfig(guild.id);
+
+        const incoming =
+            req.body?.economy;
+
+        if (!incoming) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "No se recibió la configuración de economía."
+            });
+        }
+
+        // -------------------------------------------------
+        // 💼 WORK
+        // -------------------------------------------------
+
+        if (incoming.work) {
+
+            if (
+                typeof incoming.work.time === "string" &&
+                incoming.work.time.trim()
+            ) {
+                const parsed =
+                    parseDuration(
+                        incoming.work.time
+                    );
+
+                if (parsed !== null) {
+                    config.economy.work.time =
+                        parsed;
+                }
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.work.min)
+                )
+            ) {
+                config.economy.work.min =
+                    Math.max(
+                        0,
+                        Number(incoming.work.min)
+                    );
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.work.max)
+                )
+            ) {
+                config.economy.work.max =
+                    Math.max(
+                        config.economy.work.min,
+                        Number(incoming.work.max)
+                    );
+            }
+        }
+
+        // -------------------------------------------------
+        // 🎲 SLUT
+        // -------------------------------------------------
+
+        if (incoming.slut) {
+
+            if (
+                typeof incoming.slut.time === "string" &&
+                incoming.slut.time.trim()
+            ) {
+                const parsed =
+                    parseDuration(
+                        incoming.slut.time
+                    );
+
+                if (parsed !== null) {
+                    config.economy.slut.time =
+                        parsed;
+                }
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.slut.min)
+                )
+            ) {
+                config.economy.slut.min =
+                    Math.max(
+                        0,
+                        Number(incoming.slut.min)
+                    );
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.slut.max)
+                )
+            ) {
+                config.economy.slut.max =
+                    Math.max(
+                        config.economy.slut.min,
+                        Number(incoming.slut.max)
+                    );
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.slut.winChance)
+                )
+            ) {
+                config.economy.slut.winChance =
+                    Math.min(
+                        100,
+                        Math.max(
+                            0,
+                            Number(
+                                incoming.slut.winChance
+                            )
+                        )
+                    );
+            }
+        }
+
+        // -------------------------------------------------
+        // 🔪 CRIME
+        // -------------------------------------------------
+
+        if (incoming.crime) {
+
+            if (
+                typeof incoming.crime.time === "string" &&
+                incoming.crime.time.trim()
+            ) {
+                const parsed =
+                    parseDuration(
+                        incoming.crime.time
+                    );
+
+                if (parsed !== null) {
+                    config.economy.crime.time =
+                        parsed;
+                }
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.crime.min)
+                )
+            ) {
+                config.economy.crime.min =
+                    Math.max(
+                        0,
+                        Number(incoming.crime.min)
+                    );
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.crime.max)
+                )
+            ) {
+                config.economy.crime.max =
+                    Math.max(
+                        config.economy.crime.min,
+                        Number(incoming.crime.max)
+                    );
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.crime.winChance)
+                )
+            ) {
+                config.economy.crime.winChance =
+                    Math.min(
+                        100,
+                        Math.max(
+                            0,
+                            Number(
+                                incoming.crime.winChance
+                            )
+                        )
+                    );
+            }
+        }
+
+        // -------------------------------------------------
+        // 🥷 ROB
+        // -------------------------------------------------
+
+        if (incoming.rob) {
+
+            if (
+                typeof incoming.rob.time === "string" &&
+                incoming.rob.time.trim()
+            ) {
+                const parsed =
+                    parseDuration(
+                        incoming.rob.time
+                    );
+
+                if (parsed !== null) {
+                    config.economy.rob.time =
+                        parsed;
+                }
+            }
+
+            if (
+                Number.isFinite(
+                    Number(incoming.rob.winChance)
+                )
+            ) {
+                config.economy.rob.winChance =
+                    Math.min(
+                        100,
+                        Math.max(
+                            0,
+                            Number(
+                                incoming.rob.winChance
+                            )
+                        )
+                    );
+            }
+        }
+
+        saveData();
+
+        return res.json({
+            success: true,
+            message:
+                "Configuración guardada correctamente."
+        });
+    }
+);
+
+// =====================================================
+// ⏱️ CONVERTIR TIEMPOS
+// =====================================================
+
+function parseDuration(value) {
+
+    if (
+        typeof value !== "string" ||
+        !value.trim()
+    ) {
+        return null;
+    }
+
+    const text =
+        value.trim().toLowerCase();
+
+    const match =
+        text.match(
+            /^(\d+(?:\.\d+)?)\s*(s|m|h|d)$/
+        );
+
+    if (!match) {
+        return null;
+    }
+
+    const number =
+        Number(match[1]);
+
+    const unit =
+        match[2];
+
+    if (!Number.isFinite(number)) {
+        return null;
+    }
+
+    const multipliers = {
+        s: 1000,
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000
+    };
+
+    return Math.max(
+        1000,
+        Math.round(
+            number * multipliers[unit]
+        )
+    );
+}
+
+// =====================================================
+// 🌐 RUTA PRINCIPAL
+// =====================================================
+
+app.get("/", (req, res) => {
     res.send(
         "🌸 Akari Bot está funcionando correctamente."
     );
 });
 
-app.listen(PORT, () => {
+// =====================================================
+// 🚀 SERVIDOR HTTP
+// =====================================================
 
+app.listen(PORT, () => {
     console.log(
         `🌐 Servidor HTTP activo en el puerto ${PORT}`
     );
 });
 
 // =====================================================
-// 🚀 LOGIN
+// 🚀 LOGIN DISCORD
 // =====================================================
 
 if (!TOKEN) {

@@ -11,62 +11,100 @@ const {
 } = require("discord.js");
 
 const fs = require("node:fs");
-const path = require("node:path");
-
-// ==================== AKARI BOT ====================
+const http = require("node:http");
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const OWNER_ID = process.env.BOT_OWNER_ID;
-
-if (!TOKEN) {
-  throw new Error("Falta la variable DISCORD_TOKEN en Render.");
-}
-if (!OWNER_ID) {
-  throw new Error("Falta BOT_OWNER_ID: introduce tu ID de Discord en Render.");
-}
-
+const OWNER_ID = process.env.BOT_OWNER_ID || "";
 const PREFIX = "M";
 const PINK = 0xff9dcc;
-const DATA_FILE = path.join(__dirname, "akari-data.json");
+const DATA_FILE = "./akari-data.json";
+
+if (!TOKEN) {
+  console.error("Falta la variable DISCORD_TOKEN en Render.");
+  process.exit(1);
+}
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel, Partials.GuildMember, Partials.User]
 });
 
-const defaultData = {
-  guilds: {},
-  users: {},
-  spam: {}
-};
-
-let data = defaultData;
-
+let db = {};
 try {
   if (fs.existsSync(DATA_FILE)) {
-    const loaded = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    data = {
-      ...defaultData,
-      ...loaded,
-      guilds: loaded.guilds || {},
-      users: loaded.users || {},
-      spam: loaded.spam || {}
-    };
+    db = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   }
 } catch (error) {
-  console.error("No se pudo leer akari-data.json:", error);
-  throw new Error("El archivo de datos tiene JSON inválido. Corrígelo antes de iniciar.");
+  console.error("No se pudo leer akari-data.json:", error.message);
+  db = {};
 }
 
 function save() {
-  const temp = DATA_FILE + ".tmp";
-  fs.writeFileSync(temp, JSON.stringify(data, null, 2));
-  fs.renameSync(temp, DATA_FILE);
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+  } catch (error) {
+    console.error("Error guardando datos:", error.message);
+  }
+}
+
+function guildData(guildId) {
+  if (!db[guildId]) {
+    db[guildId] = {
+      users: {},
+      config: {
+        welcome: null,
+        goodbye: null,
+        logs: null,
+        antilink: false,
+        antispam: false,
+        tickets: null,
+        ticketCategory: null
+      },
+      admins: []
+    };
+  }
+
+  const g = db[guildId];
+  g.users ||= {};
+  g.config ||= {};
+  g.admins ||= [];
+  return g;
+}
+
+function userData(guildId, userId) {
+  const g = guildData(guildId);
+  if (!g.users[userId]) {
+    g.users[userId] = {
+      wallet: 0,
+      bank: 0,
+      lastDaily: 0,
+      lastWork: 0,
+      lastRob: 0,
+      xp: 0,
+      level: 0,
+      warns: 0,
+      inventory: {},
+      lastMessage: 0,
+      spamCount: 0
+    };
+  }
+
+  const u = g.users[userId];
+  u.wallet ??= 0;
+  u.bank ??= 0;
+  u.lastDaily ??= 0;
+  u.lastWork ??= 0;
+  u.lastRob ??= 0;
+  u.xp ??= 0;
+  u.level ??= 0;
+  u.warns ??= 0;
+  u.inventory ||= {};
+  return u;
 }
 
 function embed(title, description = "") {
@@ -74,940 +112,891 @@ function embed(title, description = "") {
     .setColor(PINK)
     .setTitle(`🌸 ${title}`)
     .setDescription(description)
-    .setFooter({ text: "Akari Bot 🌸" })
     .setTimestamp();
-}
-
-function getGuild(guildId) {
-  if (!data.guilds[guildId]) {
-    data.guilds[guildId] = {
-      admins: [],
-      welcomeChannel: null,
-      goodbyeChannel: null,
-      logsChannel: null,
-      antiLink: false,
-      antiSpam: false,
-      ticketsCategory: null
-    };
-  }
-  return data.guilds[guildId];
-}
-
-function getUser(userId) {
-  if (!data.users[userId]) {
-    data.users[userId] = {
-      wallet: 500,
-      bank: 0,
-      inventory: [],
-      xp: 0,
-      level: 0,
-      lastWork: 0,
-      lastSlut: 0,
-      lastRob: 0,
-      lastCrime: 0,
-      lastDaily: 0,
-      warnings: 0
-    };
-  }
-
-  const user = data.users[userId];
-  user.wallet ??= 500;
-  user.bank ??= 0;
-  user.inventory ??= [];
-  user.xp ??= 0;
-  user.level ??= 0;
-  user.warnings ??= 0;
-  return user;
-}
-
-function money(n) {
-  return `${Math.floor(n).toLocaleString("es-ES")} monedas 🌸`;
-}
-
-function parseAmount(value, max) {
-  if (!value) return null;
-  if (value.toLowerCase() === "all") return max;
-  const n = Number(value);
-  if (!Number.isSafeInteger(n) || n <= 0) return null;
-  return Math.min(n, max);
-}
-
-function isAdmin(message) {
-  if (!message.guild) return false;
-  const settings = getGuild(message.guild.id);
-  return message.author.id === OWNER_ID ||
-    message.member.permissions.has(PermissionFlagsBits.Administrator) ||
-    settings.admins.some(id => message.member.roles.cache.has(id));
-}
-
-function isOwner(message) {
-  return message.author.id === OWNER_ID;
-}
-
-async function logAction(guild, text) {
-  const settings = getGuild(guild.id);
-  const channel = settings.logsChannel
-    ? guild.channels.cache.get(settings.logsChannel)
-    : null;
-
-  if (channel && channel.isTextBased()) {
-    await channel.send({ embeds: [embed("Registro", text)] }).catch(() => {});
-  }
 }
 
 async function reply(message, title, description) {
   return message.reply({ embeds: [embed(title, description)] });
 }
 
+function isAdmin(member) {
+  return Boolean(
+    member &&
+    (member.permissions.has(PermissionFlagsBits.Administrator) ||
+      member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+      member.id === OWNER_ID ||
+      guildData(member.guild.id).admins.includes(member.id))
+  );
+}
+
+function isModerator(member) {
+  return Boolean(
+    member &&
+    (isAdmin(member) ||
+      member.permissions.has(PermissionFlagsBits.ModerateMembers) ||
+      member.permissions.has(PermissionFlagsBits.KickMembers) ||
+      member.permissions.has(PermissionFlagsBits.BanMembers))
+  );
+}
+
+async function sendLog(guild, text) {
+  const id = guildData(guild.id).config.logs;
+  if (!id) return;
+
+  const channel = guild.channels.cache.get(id);
+  if (!channel || !channel.isTextBased()) return;
+
+  try {
+    await channel.send({ embeds: [embed("Registro", text)] });
+  } catch (error) {
+    console.error("No se pudo enviar el registro:", error.message);
+  }
+}
+
+function duration(ms) {
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `${seconds} segundos`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)} minutos`;
+  return `${Math.ceil(seconds / 3600)} horas`;
+}
+
+function getTarget(message, args) {
+  return message.mentions.members.first() ||
+    message.guild.members.cache.get(args[0]) ||
+    null;
+}
+
 const cooldowns = new Map();
+const recentMessages = new Map();
 
-function onCooldown(userId, command, seconds) {
-  const key = `${userId}:${command}`;
-  const now = Date.now();
-  const until = cooldowns.get(key) || 0;
+client.once("ready", () => {
+  console.log(`Akari Bot conectado como ${client.user.tag}`);
+  client.user.setPresence({
+    activities: [{ name: "Akari Community 🌸" }],
+    status: "online"
+  });
+});
 
-  if (until > now) return Math.ceil((until - now) / 1000);
+client.on("guildMemberAdd", async member => {
+  const cfg = guildData(member.guild.id).config;
+  if (!cfg.welcome) return;
 
-  cooldowns.set(key, now + seconds * 1000);
-  return 0;
+  const channel = member.guild.channels.cache.get(cfg.welcome);
+  if (!channel || !channel.isTextBased()) return;
+
+  try {
+    await channel.send({
+      embeds: [
+        embed(
+          "¡Bienvenido/a a Akari Community!",
+          `¡Hola ${member}! 🌸\nEsperamos que disfrutes tu estancia en **${member.guild.name}**.\nAhora somos **${member.guild.memberCount}** miembros.`
+        ).setThumbnail(member.user.displayAvatarURL())
+      ]
+    });
+  } catch (error) {
+    console.error("Error de bienvenida:", error.message);
+  }
+});
+
+client.on("guildMemberRemove", async member => {
+  const cfg = guildData(member.guild.id).config;
+  if (!cfg.goodbye) return;
+
+  const channel = member.guild.channels.cache.get(cfg.goodbye);
+  if (!channel || !channel.isTextBased()) return;
+
+  try {
+    await channel.send({
+      embeds: [
+        embed(
+          "Hasta pronto",
+          `**${member.user.tag}** ha salido del servidor. 🌷`
+        )
+      ]
+    });
+  } catch (error) {
+    console.error("Error de despedida:", error.message);
+  }
+});
+
+const helpOptions = [
+  { label: "General", value: "general", emoji: "🌸", description: "Información y utilidades" },
+  { label: "Economía", value: "economy", emoji: "💰", description: "Dinero y banco" },
+  { label: "Tienda", value: "shop", emoji: "🛍️", description: "Comprar y vender" },
+  { label: "Diversión", value: "fun", emoji: "🎮", description: "Juegos y entretenimiento" },
+  { label: "Social", value: "social", emoji: "💕", description: "Comandos sociales" },
+  { label: "Niveles", value: "levels", emoji: "⭐", description: "XP y experiencia" },
+  { label: "Moderación", value: "mod", emoji: "🛡️", description: "Herramientas del equipo" },
+  { label: "Tickets", value: "tickets", emoji: "🎫", description: "Ayuda y soporte" }
+];
+
+const helpTexts = {
+  general:
+    "`Mhelp` — panel de ayuda\n`Mping` — latencia\n`Mbot` — información del bot\n`Mserver` — información del servidor\n`Mavatar [@usuario]` — avatar\n`Mprofile [@usuario]` — perfil",
+  economy:
+    "`Mbal` — saldo\n`Mbank` — saldo del banco\n`Mwork` — trabajar\n`Mdaily` — recompensa diaria\n`Mrob @usuario` — intentar robar\n`Mdep cantidad` — depositar\n`Mwith cantidad` — retirar\n`Mpay @usuario cantidad` — transferir",
+  shop:
+    "`Mshop` — catálogo\n`Mbuy artículo` — comprar\n`Minv` — inventario\n`Msell artículo` — vender\n`Muse artículo` — usar artículo",
+  fun:
+    "`Mcoinflip` — cara o cruz\n`Mdice` — lanzar dado\n`Mguess número` — adivinar del 1 al 5\n`Mmeme` — meme aleatorio",
+  social:
+    "`Mhug @usuario` — abrazo amistoso\n`Mkiss @usuario` — gesto amistoso\n`Mfriend @usuario` — amistad\n`Mcompat @usuario` — compatibilidad aleatoria",
+  levels:
+    "`Mlevel [@usuario]` — nivel\n`Mrank` — clasificación de experiencia",
+  mod:
+    "`Mkick @usuario [motivo]`\n`Mban @usuario [motivo]`\n`Mmute @usuario minutos [motivo]`\n`Munmute @usuario`\n`Mwarn @usuario [motivo]`\n`Mclear cantidad`",
+  tickets:
+    "`Mticket` — abrir ticket\n`Mclose` — cerrar ticket actual"
+};
+
+function helpEmbed(category = "general") {
+  const selected = helpOptions.find(o => o.value === category) || helpOptions[0];
+  return embed(`Ayuda • ${selected.label}`, helpTexts[selected.value]);
 }
 
 function helpMenu() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("akari_help")
-      .setPlaceholder("🌸 Selecciona una categoría")
-      .addOptions(
-        { label: "General e información", value: "general", emoji: "🌸" },
-        { label: "Economía", value: "economy", emoji: "💰" },
-        { label: "Tienda e inventario", value: "shop", emoji: "🛍️" },
-        { label: "Diversión", value: "fun", emoji: "🎮" },
-        { label: "Social", value: "social", emoji: "💗" },
-        { label: "Niveles y ranking", value: "levels", emoji: "🌟" },
-        { label: "Moderación", value: "moderation", emoji: "🛡️" },
-        { label: "Tickets", value: "tickets", emoji: "🎟️" }
-      )
+      .setPlaceholder("Selecciona una categoría 🌸")
+      .addOptions(helpOptions)
   );
 }
-
-function adminMenu() {
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("akari_admin")
-      .setPlaceholder("⚙️ Selecciona una sección")
-      .addOptions(
-        { label: "Bienvenidas y despedidas", value: "greetings", emoji: "👋" },
-        { label: "Registros", value: "logs", emoji: "📋" },
-        { label: "Seguridad", value: "security", emoji: "🛡️" },
-        { label: "Tickets", value: "ticketconfig", emoji: "🎟️" },
-        { label: "Roles autorizados", value: "roles", emoji: "🔐" },
-        { label: "Estado de configuración", value: "status", emoji: "📊" }
-      )
-  );
-}
-
-const helpPages = {
-  general:
-    "**Mhelp** — menú de ayuda\n" +
-    "**Mbot** — información del bot\n" +
-    "**Mserver** — información del servidor\n" +
-    "**Mping** — latencia\n" +
-    "**Mavatar [@usuario]** — avatar\n" +
-    "**Mprofile [@usuario]** — perfil",
-
-  economy:
-    "**Mwork** — trabajar\n" +
-    "**Mslut** — trabajo ficticio de riesgo\n" +
-    "**Mrob @usuario** — intentar robar\n" +
-    "**Mcrime** — crimen ficticio\n" +
-    "**Mpay @usuario cantidad** — transferir monedas\n" +
-    "**Mdep all/cantidad** — depositar en el banco\n" +
-    "**Mwith all/cantidad** — retirar del banco\n" +
-    "**Mbj all/cantidad** — apostar en el minijuego\n" +
-    "**Mbal [@usuario]** — consultar cartera y banco\n" +
-    "**Mbank** — consultar el banco\n" +
-    "**Mdaily** — recompensa diaria",
-
-  shop:
-    "**Mshop** — ver la tienda\n" +
-    "**Mbuy artículo** — comprar un artículo\n" +
-    "**Minventory** — ver tu inventario\n" +
-    "**Msell artículo** — vender un artículo\n" +
-    "**Muse artículo** — usar un artículo",
-
-  fun:
-    "**Mcoinflip** — cara o cruz\n" +
-    "**Mdice** — tirar un dado\n" +
-    "**Mguess** — adivinar un número\n" +
-    "**Mmeme** — meme aleatorio",
-
-  social:
-    "**Mhug @usuario** — abrazo ficticio\n" +
-    "**Mkiss @usuario** — beso ficticio\n" +
-    "**Mfriend @usuario** — enviar amistad\n" +
-    "**Mcompat @usuario** — compatibilidad\n" +
-    "**Mprofile [@usuario]** — perfil",
-
-  levels:
-    "**Mlevel [@usuario]** — consultar nivel\n" +
-    "**Mrank [@usuario]** — consultar clasificación\n" +
-    "Escribe mensajes para ganar experiencia.",
-
-  moderation:
-    "**Mkick @usuario [razón]** — expulsar\n" +
-    "**Mban @usuario [razón]** — banear\n" +
-    "**Mmute @usuario minutos [razón]** — timeout\n" +
-    "**Munmute @usuario** — quitar timeout\n" +
-    "**Mwarn @usuario [razón]** — advertir\n" +
-    "**Mclear cantidad** — borrar mensajes\n" +
-    "Requiere permisos de moderación.",
-
-  tickets:
-    "**Mticket** — abrir un ticket\n" +
-    "**Mclose** — cerrar el ticket actual\n" +
-    "El bot necesita permisos para crear y eliminar canales."
-};
-
-client.once("ready", () => {
-  console.log(`🌸 ${client.user.tag} está en línea.`);
-  client.user.setPresence({
-    activities: [{ name: "Akari Bot 🌸" }],
-    status: "online"
-  });
-});
-
-client.on("guildMemberAdd", async member => {
-  const settings = getGuild(member.guild.id);
-  const channel = settings.welcomeChannel
-    ? member.guild.channels.cache.get(settings.welcomeChannel)
-    : null;
-
-  if (channel && channel.isTextBased()) {
-    await channel.send({
-      embeds: [
-        embed("¡Bienvenido/a a Akari Community! 🌸",
-          `¡Hola, ${member}! Esperamos que disfrutes tu estancia 💗`)
-          .setThumbnail(member.user.displayAvatarURL())
-      ]
-    }).catch(() => {});
-  }
-});
-
-client.on("guildMemberRemove", async member => {
-  const settings = getGuild(member.guild.id);
-  const channel = settings.goodbyeChannel
-    ? member.guild.channels.cache.get(settings.goodbyeChannel)
-    : null;
-
-  if (channel && channel.isTextBased()) {
-    await channel.send({
-      embeds: [
-        embed("¡Hasta pronto! 🌸",
-          `**${member.user.tag}** ha salido del servidor.`)
-      ]
-    }).catch(() => {});
-  }
-});
 
 client.on("interactionCreate", async interaction => {
-  if (!interaction.isStringSelectMenu()) return;
+  try {
+    if (!interaction.isStringSelectMenu()) return;
 
-  if (interaction.customId === "akari_help") {
-    const page = helpPages[interaction.values[0]];
-    if (!page) {
-      return interaction.reply({
-        content: "Categoría no encontrada.",
-        ephemeral: true
+    if (interaction.customId === "akari_help") {
+      await interaction.update({
+        embeds: [helpEmbed(interaction.values[0])],
+        components: [helpMenu()]
       });
     }
-
-    return interaction.reply({
-      embeds: [embed("Comandos de Akari", page)],
-      ephemeral: true
-    });
-  }
-
-  if (interaction.customId === "akari_admin") {
-    if (!interaction.guild || !interaction.member) {
-      return interaction.reply({
-        content: "Este menú solo funciona en un servidor.",
-        ephemeral: true
-      });
+  } catch (error) {
+    console.error("Error de interacción:", error.message);
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: "Ocurrió un error con esta interacción.",
+          ephemeral: true
+        });
+      } catch {}
     }
-
-    const settings = getGuild(interaction.guild.id);
-    const member = await interaction.guild.members.fetch(interaction.user.id);
-    const permitted = interaction.user.id === OWNER_ID ||
-      member.permissions.has(PermissionFlagsBits.Administrator) ||
-      settings.admins.some(id => member.roles.cache.has(id));
-
-    if (!permitted) {
-      return interaction.reply({
-        content: "🔒 No tienes permiso para usar este panel.",
-        ephemeral: true
-      });
-    }
-
-    const pages = {
-      greetings:
-        "**Configurar bienvenida:**\n`Madmin welcome #canal`\n\n" +
-        "**Configurar despedida:**\n`Madmin goodbye #canal`\n\n" +
-        "**Desactivar:** `Madmin welcome off` o `Madmin goodbye off`",
-
-      logs:
-        "**Establecer canal de registros:**\n`Madmin logs #canal`\n\n" +
-        "**Desactivar registros:** `Madmin logs off`",
-
-      security:
-        "**Activar antienlaces:** `Madmin antilink on`\n" +
-        "**Desactivar antienlaces:** `Madmin antilink off`\n\n" +
-        "**Activar antispam:** `Madmin antispam on`\n" +
-        "**Desactivar antispam:** `Madmin antispam off`",
-
-      ticketconfig:
-        "**Abrir ticket:** `Mticket`\n" +
-        "**Cerrar ticket:** `Mclose`\n\n" +
-        "Los tickets se crean como canales privados.",
-
-      roles:
-        "**Añadir rol autorizado:** `Maddadmin @rol`\n" +
-        "**Quitar rol autorizado:** `Mremoveadmin @rol`\n" +
-        "**Ver roles:** `Mlistadmin`\n\n" +
-        "Solo el propietario configurado del bot puede gestionar estos roles.",
-
-      status:
-        `Bienvenidas: ${settings.welcomeChannel ? `<#${settings.welcomeChannel}>` : "desactivadas"}\n` +
-        `Despedidas: ${settings.goodbyeChannel ? `<#${settings.goodbyeChannel}>` : "desactivadas"}\n` +
-        `Registros: ${settings.logsChannel ? `<#${settings.logsChannel}>` : "desactivados"}\n` +
-        `Antienlaces: ${settings.antiLink ? "activado" : "desactivado"}\n` +
-        `Antispam: ${settings.antiSpam ? "activado" : "desactivado"}\n` +
-        `Roles autorizados: ${settings.admins.length}`
-    };
-
-    return interaction.reply({
-      embeds: [embed("Panel de administración", pages[interaction.values[0]])],
-      ephemeral: true
-    });
   }
 });
 
 client.on("messageCreate", async message => {
-  if (message.author.bot || !message.guild) return;
+  if (!message.guild || message.author.bot) return;
 
-  const settings = getGuild(message.guild.id);
-  const user = getUser(message.author.id);
+  const g = guildData(message.guild.id);
+  const u = userData(message.guild.id, message.author.id);
+  const content = message.content.trim();
+  const parts = content.split(/\s+/);
+  const command = (parts.shift() || "").toLowerCase();
+  const args = parts;
+  const cfg = g.config;
 
-  // Experiencia por mensajes.
-  user.xp += Math.floor(Math.random() * 6) + 5;
-  const nextLevel = (user.level + 1) * 100;
+  // XP por mensajes
+  if (content.length > 2) {
+    u.xp += Math.floor(Math.random() * 6) + 5;
+    const needed = (u.level + 1) * 100;
 
-  if (user.xp >= nextLevel) {
-    user.xp -= nextLevel;
-    user.level++;
-    message.channel.send({
-      embeds: [
-        embed("¡Subiste de nivel! 🌟",
-          `${message.author} ahora es nivel **${user.level}**.`)
-      ]
-    }).catch(() => {});
+    if (u.xp >= needed) {
+      u.xp -= needed;
+      u.level++;
+      message.channel.send({
+        embeds: [
+          embed("¡Subiste de nivel!", `${message.author} ahora es nivel **${u.level}**. ⭐`)
+        ]
+      }).catch(() => {});
+    }
   }
 
-  // Antispam sencillo.
-  if (settings.antiSpam) {
+  // Antispam sencillo
+  if (cfg.antispam) {
     const key = `${message.guild.id}:${message.author.id}`;
     const now = Date.now();
-    const old = data.spam[key] || [];
-    const recent = old.filter(t => now - t < 8000);
+    const recent = recentMessages.get(key) || [];
     recent.push(now);
-    data.spam[key] = recent;
+    const fresh = recent.filter(t => now - t < 5000);
+    recentMessages.set(key, fresh);
 
-    if (recent.length >= 6) {
-      data.spam[key] = [];
-      await message.delete().catch(() => {});
-      await message.member.timeout(60_000, "Antispam de Akari Bot").catch(() => {});
-      await logAction(message.guild, `Antispam: ${message.author.tag}`);
+    if (fresh.length > 6 && !isModerator(message.member)) {
+      try {
+        await message.delete();
+        await message.member.timeout(60_000, "Antispam automático");
+        await message.channel.send(`${message.author}, evita enviar demasiados mensajes seguidos.`)
+          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
+          .catch(() => {});
+      } catch (error) {
+        console.error("Error antispam:", error.message);
+      }
       return;
     }
   }
 
-  // Antienlaces.
-  if (settings.antiLink && /(https?:\/\/|discord\.gg\/|www\.)/i.test(message.content)) {
-    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-      await message.delete().catch(() => {});
-      await message.channel.send({
-        content: `${message.author}`,
-        embeds: [embed("Enlace eliminado", "Los enlaces no están permitidos aquí.")]
-      }).then(m => setTimeout(() => m.delete().catch(() => {}), 5000)).catch(() => {});
-      await logAction(message.guild, `Enlace eliminado de ${message.author.tag}`);
-      return;
+  // Antilink básico
+  if (
+    cfg.antilink &&
+    /(https?:\/\/|discord\.gg\/|www\.)/i.test(content) &&
+    !isModerator(message.member)
+  ) {
+    try {
+      await message.delete();
+      await message.channel.send(`${message.author}, no se permiten enlaces aquí.`)
+        .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
+        .catch(() => {});
+      await sendLog(message.guild, `Enlace bloqueado de ${message.author.tag}.`);
+    } catch (error) {
+      console.error("Error antilink:", error.message);
     }
+    return;
   }
 
-  if (!message.content.toLowerCase().startsWith(PREFIX.toLowerCase())) {
+  if (!command.startsWith(PREFIX.toLowerCase())) {
     save();
     return;
   }
 
-  const input = message.content.slice(PREFIX.length).trim();
-  if (!input) return;
-
-  const args = input.split(/\s+/);
-  const command = args.shift().toLowerCase();
+  const name = command.slice(PREFIX.length);
+  const now = Date.now();
 
   try {
-    // ================ AYUDA Y GENERAL ================
-
-    if (command === "help") {
-      return message.reply({
-        embeds: [
-          embed("Akari Bot 🌸",
-            "¡Hola! Selecciona una categoría para ver sus comandos.\n" +
-            "Usa `Madmin` para abrir el panel de administración autorizado.")
-        ],
-        components: [helpMenu()]
-      });
-    }
-
-    if (command === "ping") {
-      return reply(message, "Pong! 🌸", `Latencia: **${client.ws.ping} ms**`);
-    }
-
-    if (command === "bot") {
-      return reply(message, "Información del bot",
-        `Nombre: **${client.user.tag}**\nServidores: **${client.guilds.cache.size}**\nUsuarios en caché: **${client.users.cache.size}**`);
-    }
-
-    if (command === "server") {
-      return reply(message, "Información del servidor",
-        `Nombre: **${message.guild.name}**\nMiembros: **${message.guild.memberCount}**\nCanales: **${message.guild.channels.cache.size}**`);
-    }
-
-    if (command === "avatar") {
-      const target = message.mentions.users.first() || message.author;
-      return message.reply({
-        embeds: [
-          embed(`Avatar de ${target.username}`)
-            .setImage(target.displayAvatarURL({ size: 1024 }))
-        ]
-      });
-    }
-
-    if (command === "profile") {
-      const target = message.mentions.users.first() || message.author;
-      const u = getUser(target.id);
-      return reply(message, `Perfil de ${target.username}`,
-        `Nivel: **${u.level}**\nExperiencia: **${u.xp} XP**\nCartera: **${money(u.wallet)}**\nBanco: **${money(u.bank)}**`);
-    }
-
-    // ================ ECONOMÍA ================
-
-    if (command === "bal" || command === "balance") {
-      const target = message.mentions.users.first() || message.author;
-      const u = getUser(target.id);
-      return reply(message, `Saldo de ${target.username}`,
-        `👛 Cartera: **${money(u.wallet)}**\n🏦 Banco: **${money(u.bank)}**\n💰 Total: **${money(u.wallet + u.bank)}**`);
-    }
-
-    if (command === "bank") {
-      return reply(message, "Tu banco", `Saldo bancario: **${money(user.bank)}**`);
-    }
-
-    if (command === "work" || command === "slut" || command === "crime") {
-      const config = {
-        work: { field: "lastWork", cooldown: 30, min: 100, max: 300, title: "Trabajo" },
-        slut: { field: "lastSlut", cooldown: 60, min: 100, max: 350, title: "Trabajo ficticio de riesgo" },
-        crime: { field: "lastCrime", cooldown: 120, min: 500, max: 700, title: "Crimen ficticio" }
-      }[command];
-
-      const wait = onCooldown(message.author.id, command, config.cooldown);
-      if (wait) return reply(message, "Espera un poquito 🌸", `Vuelve a intentarlo en **${wait} segundos**.`);
-
-      let amount;
-      let text;
-
-      if (command === "crime" && Math.random() < 0.2) {
-        amount = -600;
-        text = `La misión salió mal y perdiste **${money(600)}**.`;
-      } else if (command === "slut" && Math.random() < 0.3) {
-        amount = -Math.floor(Math.random() * 201 + 300);
-        text = `El trabajo salió mal y perdiste **${money(-amount)}**.`;
-      } else {
-        amount = Math.floor(Math.random() * (config.max - config.min + 1)) + config.min;
-        text = `Ganaste **${money(amount)}**.`;
-      }
-
-      user.wallet = Math.max(0, user.wallet + amount);
-      save();
-      return reply(message, config.title, text + `\nCartera actual: **${money(user.wallet)}**`);
-    }
-
-    if (command === "rob") {
-      const target = message.mentions.users.first();
-      if (!target || target.bot || target.id === message.author.id) {
-        return reply(message, "Uso incorrecto", "Usa `Mrob @usuario`.");
-      }
-
-      const wait = onCooldown(message.author.id, "rob", 120);
-      if (wait) return reply(message, "Espera", `Prueba otra vez en **${wait} segundos**.`);
-
-      const victim = getUser(target.id);
-      if (victim.wallet < 100) return reply(message, "Robo imposible", "Ese usuario no tiene suficiente dinero en la cartera.");
-
-      if (Math.random() < 0.45) {
-        const amount = Math.min(victim.wallet, Math.floor(Math.random() * 201) + 50);
-        victim.wallet -= amount;
-        user.wallet += amount;
-        save();
-        return reply(message, "¡Robo exitoso!", `Conseguiste **${money(amount)}** de ${target}.`);
-      }
-
-      const fine = Math.min(user.wallet, Math.floor(Math.random() * 151) + 50);
-      user.wallet -= fine;
-      save();
-      return reply(message, "¡Te atraparon!", `Fallaste y pagaste una multa de **${money(fine)}**.`);
-    }
-
-    if (command === "pay") {
-      const target = message.mentions.users.first();
-      const amount = Number(args[1]);
-
-      if (!target || target.bot || target.id === message.author.id ||
-          !Number.isSafeInteger(amount) || amount <= 0) {
-        return reply(message, "Uso incorrecto", "Usa `Mpay @usuario cantidad`.");
-      }
-      if (user.wallet < amount) return reply(message, "Saldo insuficiente", "No tienes suficiente dinero en la cartera.");
-
-      user.wallet -= amount;
-      getUser(target.id).wallet += amount;
-      save();
-      return reply(message, "Transferencia completada",
-        `${message.author} envió **${money(amount)}** a ${target}.`);
-    }
-
-    if (command === "dep" || command === "deposit") {
-      const amount = parseAmount(args[0], user.wallet);
-      if (amount === null || amount === 0) {
-        return reply(message, "Uso incorrecto", "Usa `Mdep all` o `Mdep cantidad`.");
-      }
-
-      user.wallet -= amount;
-      user.bank += amount;
-      save();
-      return reply(message, "Depósito realizado", `Depositaste **${money(amount)}**.`);
-    }
-
-    if (command === "with" || command === "withdraw") {
-      const amount = parseAmount(args[0], user.bank);
-      if (amount === null || amount === 0) {
-        return reply(message, "Uso incorrecto", "Usa `Mwith all` o `Mwith cantidad`.");
-      }
-
-      user.bank -= amount;
-      user.wallet += amount;
-      save();
-      return reply(message, "Retiro realizado", `Retiraste **${money(amount)}**.`);
-    }
-
-    if (command === "bj") {
-      const amount = parseAmount(args[0], user.wallet);
-      if (amount === null || amount === 0) {
-        return reply(message, "Uso incorrecto", "Usa `Mbj all` o `Mbj cantidad`.");
-      }
-
-      user.wallet -= amount;
-
-      // Minijuego sencillo de azar inspirado en blackjack.
-      const playerScore = Math.floor(Math.random() * 10) + 12;
-      const dealerScore = Math.floor(Math.random() * 10) + 12;
-      let result;
-
-      if (playerScore > dealerScore) {
-        const winnings = amount * 2;
-        user.wallet += winnings;
-        result = `¡Ganaste **${money(amount)}**!`;
-      } else if (playerScore === dealerScore) {
-        user.wallet += amount;
-        result = "¡Empate! Recuperaste tu apuesta.";
-      } else {
-        result = `Perdiste **${money(amount)}**.`;
-      }
-
-      save();
-      return reply(message, "Blackjack 🌸",
-        `Tu puntuación: **${playerScore}**\nBanca: **${dealerScore}**\n${result}\nCartera: **${money(user.wallet)}**`);
-    }
-
-    if (command === "daily") {
-      const wait = onCooldown(message.author.id, "daily", 86400);
-      if (wait) return reply(message, "Recompensa diaria", `Vuelve en **${Math.ceil(wait / 3600)} horas**.`);
-
-      const amount = 500;
-      user.wallet += amount;
-      save();
-      return reply(message, "Recompensa diaria 🌸", `Recibiste **${money(amount)}**.`);
-    }
-
-    // ================ TIENDA E INVENTARIO ================
-
-    const shop = {
-      rosa: { price: 100, description: "Una rosa para regalar." },
-      pastel: { price: 250, description: "Un pastel delicioso." },
-      amuleto: { price: 500, description: "Un amuleto decorativo." }
-    };
-
-    if (command === "shop") {
-      const listing = Object.entries(shop)
-        .map(([name, item]) => `**${name}** — ${money(item.price)}\n${item.description}`)
-        .join("\n\n");
-      return reply(message, "Tienda de Akari", listing);
-    }
-
-    if (command === "buy") {
-      const name = (args[0] || "").toLowerCase();
-      const item = shop[name];
-      if (!item) return reply(message, "Artículo desconocido", "Usa `Mshop` para ver los artículos.");
-      if (user.wallet < item.price) return reply(message, "Saldo insuficiente", "No tienes suficiente dinero.");
-
-      user.wallet -= item.price;
-      user.inventory.push(name);
-      save();
-      return reply(message, "¡Compra realizada!", `Compraste **${name}** por **${money(item.price)}**.`);
-    }
-
-    if (command === "inventory" || command === "inv") {
-      const counts = {};
-      for (const item of user.inventory) counts[item] = (counts[item] || 0) + 1;
-      const text = Object.keys(counts).length
-        ? Object.entries(counts).map(([name, n]) => `**${name}** × ${n}`).join("\n")
-        : "Tu inventario está vacío. Usa `Mshop`.";
-      return reply(message, "Tu inventario 🛍️", text);
-    }
-
-    if (command === "sell") {
-      const name = (args[0] || "").toLowerCase();
-      const index = user.inventory.indexOf(name);
-      if (index === -1 || !shop[name]) {
-        return reply(message, "No tienes ese artículo", "Revisa tu inventario con `Minventory`.");
-      }
-
-      user.inventory.splice(index, 1);
-      const amount = Math.floor(shop[name].price / 2);
-      user.wallet += amount;
-      save();
-      return reply(message, "Artículo vendido", `Vendiste **${name}** por **${money(amount)}**.`);
-    }
-
-    if (command === "use") {
-      const name = (args[0] || "").toLowerCase();
-      const index = user.inventory.indexOf(name);
-      if (index === -1) return reply(message, "Artículo no encontrado", "Revisa tu inventario.");
-
-      user.inventory.splice(index, 1);
-      save();
-      return reply(message, "Artículo utilizado", `Usaste **${name}**. ¡Gracias por jugar! 🌸`);
-    }
-
-    // ================ DIVERSIÓN Y SOCIAL ================
-
-    if (command === "coinflip") {
-      return reply(message, "Cara o cruz", Math.random() < 0.5 ? "Salió **cara** 🌸" : "Salió **cruz** 🌸");
-    }
-
-    if (command === "dice") {
-      return reply(message, "Dado 🎲", `Sacaste **${Math.floor(Math.random() * 6) + 1}**.`);
-    }
-
-    if (command === "guess") {
-      const n = Number(args[0]);
-      if (!Number.isInteger(n) || n < 1 || n > 5) {
-        return reply(message, "Adivina el número", "Usa `Mguess 1` hasta `Mguess 5`.");
-      }
-      const secret = Math.floor(Math.random() * 5) + 1;
-      return reply(message, "Adivinanza", n === secret ? "¡Acertaste! 🌸" : `No era ese. El número era **${secret}**.`);
-    }
-
-    if (command === "meme") {
-      const memes = [
-        "Yo diciendo que solo estaré cinco minutos en Discord… y amanece.",
-        "Mi cartera después de entrar a la tienda: adiós, monedas.",
-        "Cuando el bot responde justo cuando iba a cerrar Discord."
-      ];
-      return reply(message, "Meme de Akari", memes[Math.floor(Math.random() * memes.length)]);
-    }
-
-    if (["hug", "kiss", "friend"].includes(command)) {
-      const target = message.mentions.users.first();
-      if (!target || target.bot || target.id === message.author.id) {
-        return reply(message, "Uso incorrecto", `Usa \`M${command} @usuario\`.`);
-      }
-
-      const text = {
-        hug: `🤗 ${message.author} le manda un abrazo amistoso a ${target}.`,
-        kiss: `🌸 ${message.author} le manda un beso ficticio y amistoso a ${target}.`,
-        friend: `💗 ${message.author} quiere ser amigo/a de ${target}.`
-      }[command];
-
-      return reply(message, "Momento social", text);
-    }
-
-    if (command === "compat") {
-      const target = message.mentions.users.first();
-      if (!target || target.id === message.author.id) {
-        return reply(message, "Uso incorrecto", "Usa `Mcompat @usuario`.");
-      }
-      const percentage = Math.floor(Math.random() * 101);
-      return reply(message, "Compatibilidad 💗",
-        `${message.author.username} + ${target.username}\nCompatibilidad de amistad: **${percentage}%**`);
-    }
-
-    if (command === "level" || command === "rank") {
-      const target = message.mentions.users.first() || message.author;
-      const u = getUser(target.id);
-      const rank = Object.values(data.users)
-        .filter(x => x && typeof x.xp === "number")
-        .sort((a, b) => (b.level * 100 + b.xp) - (a.level * 100 + a.xp))
-        .findIndex(x => x === u) + 1;
-
-      return reply(message, `Nivel de ${target.username}`,
-        `Nivel: **${u.level}**\nExperiencia: **${u.xp} XP**\nPosición aproximada: **#${rank || "?"}**`);
-    }
-
-    // ================ MADMIN Y CONFIGURACIÓN ================
-
-    if (command === "admin") {
-      if (!isAdmin(message)) {
-        return reply(message, "Acceso denegado", "No tienes permiso para abrir `Madmin`.");
-      }
-
-      const option = (args[0] || "").toLowerCase();
-      const value = args[1];
-      const channel = message.mentions.channels.first();
-      const enabled = value === "on";
-
-      if (!option) {
-        return message.reply({
-          embeds: [
-            embed("Panel administrativo 🌸",
-              "Selecciona una sección. Los ajustes se cambian con los comandos indicados en el menú.")
-          ],
-          components: [adminMenu()]
+    switch (name) {
+      case "help": {
+        await message.reply({
+          embeds: [helpEmbed()],
+          components: [helpMenu()]
         });
+        break;
       }
 
-      if (["welcome", "goodbye", "logs"].includes(option)) {
-        const key = {
-          welcome: "welcomeChannel",
-          goodbye: "goodbyeChannel",
-          logs: "logsChannel"
-        }[option];
+      case "ping":
+        await reply(message, "Pong!", `Latencia: **${client.ws.ping} ms**`);
+        break;
 
-        if (value === "off") {
-          settings[key] = null;
+      case "bot":
+        await reply(
+          message,
+          "Akari Bot",
+          `Bot rosa de Akari Community 🌸\nServidores: **${client.guilds.cache.size}**\nUsuarios visibles: **${client.guilds.cache.reduce((n, guild) => n + guild.memberCount, 0)}**`
+        );
+        break;
+
+      case "server":
+        await reply(
+          message,
+          message.guild.name,
+          `Miembros: **${message.guild.memberCount}**\nCanales: **${message.guild.channels.cache.size}**\nCreado: <t:${Math.floor(message.guild.createdTimestamp / 1000)}:D>`
+        );
+        break;
+
+      case "avatar": {
+        const member = message.mentions.users.first() ||
+          await client.users.fetch(args[0]).catch(() => null) ||
+          message.author;
+        await message.reply({
+          embeds: [
+            embed(`Avatar de ${member.username}`)
+              .setImage(member.displayAvatarURL({ size: 1024 }))
+          ]
+        });
+        break;
+      }
+
+      case "profile": {
+        const member = message.mentions.members.first() || message.member;
+        const data = userData(message.guild.id, member.id);
+        await reply(
+          message,
+          `Perfil de ${member.user.username}`,
+          `Nivel: **${data.level}**\nXP: **${data.xp}**\nCartera: **${data.wallet} monedas**\nBanco: **${data.bank} monedas**`
+        );
+        break;
+      }
+
+      case "bal":
+      case "balance":
+        await reply(
+          message,
+          "Tu saldo",
+          `Cartera: **${u.wallet} monedas** 💵\nBanco: **${u.bank} monedas** 🏦`
+        );
+        break;
+
+      case "bank":
+        await reply(message, "Banco", `Tienes **${u.bank} monedas** guardadas.`);
+        break;
+
+      case "work": {
+        const key = `${message.author.id}:work`;
+        const left = (cooldowns.get(key) || 0) - now;
+        if (left > 0) {
+          await reply(message, "Espera un poco", `Podrás trabajar en **${duration(left)}**.`);
+          break;
+        }
+        const earned = Math.floor(Math.random() * 201) + 100;
+        u.wallet += earned;
+        cooldowns.set(key, now + 30_000);
+        await reply(message, "Trabajo completado", `Ganaste **${earned} monedas**. 💰`);
+        break;
+      }
+
+      case "daily": {
+        const wait = 24 * 60 * 60 * 1000;
+        const left = u.lastDaily + wait - now;
+        if (u.lastDaily && left > 0) {
+          await reply(message, "Recompensa diaria", `Vuelve en **${duration(left)}**.`);
+          break;
+        }
+        u.lastDaily = now;
+        u.wallet += 500;
+        await reply(message, "Recompensa diaria", "Recibiste **500 monedas**. 🌸");
+        break;
+      }
+
+      case "dep":
+      case "deposit": {
+        const amount = Number(args[0]);
+        if (!Number.isInteger(amount) || amount <= 0) {
+          await reply(message, "Cantidad inválida", "Usa `Mdep cantidad`.");
+          break;
+        }
+        if (u.wallet < amount) {
+          await reply(message, "Saldo insuficiente", "No tienes suficiente dinero en tu cartera.");
+          break;
+        }
+        u.wallet -= amount;
+        u.bank += amount;
+        await reply(message, "Depósito realizado", `Depositaste **${amount} monedas**.`);
+        break;
+      }
+
+      case "with":
+      case "withdraw": {
+        const amount = Number(args[0]);
+        if (!Number.isInteger(amount) || amount <= 0) {
+          await reply(message, "Cantidad inválida", "Usa `Mwith cantidad`.");
+          break;
+        }
+        if (u.bank < amount) {
+          await reply(message, "Saldo insuficiente", "No tienes suficiente dinero en el banco.");
+          break;
+        }
+        u.bank -= amount;
+        u.wallet += amount;
+        await reply(message, "Retiro realizado", `Retiraste **${amount} monedas**.`);
+        break;
+      }
+
+      case "pay": {
+        const target = message.mentions.users.first();
+        const amount = Number(args.find(a => /^\d+$/.test(a)));
+        if (!target || target.bot || target.id === message.author.id ||
+            !Number.isInteger(amount) || amount <= 0) {
+          await reply(message, "Uso incorrecto", "Usa `Mpay @usuario cantidad`.");
+          break;
+        }
+        if (u.wallet < amount) {
+          await reply(message, "Saldo insuficiente", "No tienes suficiente dinero.");
+          break;
+        }
+        const receiver = userData(message.guild.id, target.id);
+        u.wallet -= amount;
+        receiver.wallet += amount;
+        await reply(message, "Transferencia completada", `Enviaste **${amount} monedas** a ${target}.`);
+        break;
+      }
+
+      case "rob": {
+        const target = message.mentions.users.first();
+        const key = `${message.author.id}:rob`;
+        const left = (cooldowns.get(key) || 0) - now;
+        if (left > 0) {
+          await reply(message, "Espera", `Inténtalo de nuevo en **${duration(left)}**.`);
+          break;
+        }
+        if (!target || target.bot || target.id === message.author.id) {
+          await reply(message, "Uso incorrecto", "Usa `Mrob @usuario`.");
+          break;
+        }
+        const victim = userData(message.guild.id, target.id);
+        cooldowns.set(key, now + 120_000);
+        if (victim.wallet < 100) {
+          await reply(message, "Robo fallido", "Esa persona no tiene suficiente dinero en su cartera.");
+          break;
+        }
+        if (Math.random() < 0.3) {
+          const stolen = Math.min(victim.wallet, Math.floor(Math.random() * 201) + 100);
+          victim.wallet -= stolen;
+          u.wallet += stolen;
+          await reply(message, "¡Lo lograste!", `Conseguiste **${stolen} monedas** de ${target}.`);
+        } else {
+          const fine = Math.min(u.wallet, 100);
+          u.wallet -= fine;
+          await reply(message, "Te atraparon", `Fallaste y pagaste una multa de **${fine} monedas**.`);
+        }
+        break;
+      }
+
+      case "shop":
+        await reply(
+          message,
+          "Tienda de Akari",
+          "`flor` — 100 monedas\n`corazon` — 250 monedas\n`cristal` — 500 monedas\n\nCompra con `Mbuy artículo`."
+        );
+        break;
+
+      case "buy": {
+        const item = (args[0] || "").toLowerCase();
+        const prices = { flor: 100, corazon: 250, cristal: 500 };
+        if (!prices[item]) {
+          await reply(message, "Artículo no encontrado", "Usa `Mshop` para ver los artículos.");
+          break;
+        }
+        if (u.wallet < prices[item]) {
+          await reply(message, "Saldo insuficiente", "No tienes suficientes monedas.");
+          break;
+        }
+        u.wallet -= prices[item];
+        u.inventory[item] = (u.inventory[item] || 0) + 1;
+        await reply(message, "Compra completada", `Compraste **${item}**. 🌸`);
+        break;
+      }
+
+      case "inv":
+      case "inventory": {
+        const items = Object.entries(u.inventory)
+          .filter(([, count]) => count > 0)
+          .map(([item, count]) => `• **${item}** x${count}`);
+        await reply(message, "Inventario", items.length ? items.join("\n") : "Tu inventario está vacío.");
+        break;
+      }
+
+      case "sell": {
+        const item = (args[0] || "").toLowerCase();
+        const values = { flor: 50, corazon: 125, cristal: 250 };
+        if (!values[item] || !u.inventory[item]) {
+          await reply(message, "No puedes venderlo", "No tienes ese artículo. Revisa `Minv`.");
+          break;
+        }
+        u.inventory[item]--;
+        u.wallet += values[item];
+        await reply(message, "Venta completada", `Vendiste **${item}** por **${values[item]} monedas**.`);
+        break;
+      }
+
+      case "use": {
+        const item = (args[0] || "").toLowerCase();
+        if (!u.inventory[item] || !["flor", "corazon", "cristal"].includes(item)) {
+          await reply(message, "Artículo no disponible", "No tienes ese artículo.");
+          break;
+        }
+        u.inventory[item]--;
+        await reply(message, "Artículo utilizado", `Has utilizado **${item}**. 🌷`);
+        break;
+      }
+
+      case "coinflip":
+        await reply(message, "Cara o cruz", Math.random() < 0.5 ? "Salió **cara**. 🪙" : "Salió **cruz**. 🪙");
+        break;
+
+      case "dice":
+        await reply(message, "Dado", `Salió el número **${Math.floor(Math.random() * 6) + 1}**. 🎲`);
+        break;
+
+      case "guess": {
+        const guess = Number(args[0]);
+        if (!Number.isInteger(guess) || guess < 1 || guess > 5) {
+          await reply(message, "Adivina", "Usa `Mguess` seguido de un número del 1 al 5.");
+          break;
+        }
+        const answer = Math.floor(Math.random() * 5) + 1;
+        await reply(message, "Adivina el número", guess === answer ? `¡Correcto! Era **${answer}**. 🎉` : `Era **${answer}**. ¡Inténtalo otra vez!`);
+        break;
+      }
+
+      case "meme":
+        await reply(message, "Meme", "No tengo una galería de memes configurada todavía. 🌸");
+        break;
+
+      case "hug":
+      case "kiss":
+      case "friend":
+      case "compat": {
+        const target = message.mentions.users.first();
+        if (!target || target.id === message.author.id || target.bot) {
+          await reply(message, "Uso incorrecto", `Menciona a alguien: \`M${name} @usuario\`.`);
+          break;
+        }
+        const texts = {
+          hug: `${message.author} le manda un abrazo amistoso a ${target}. 🤗`,
+          kiss: `${message.author} le envía un saludo cariñoso a ${target}. 💕`,
+          friend: `${message.author} quiere ser amigo/a de ${target}. 🌸`,
+          compat: `La compatibilidad amistosa entre ${message.author} y ${target} es **${Math.floor(Math.random() * 101)}%**.`
+        };
+        await reply(message, "Social", texts[name]);
+        break;
+      }
+
+      case "level": {
+        const target = message.mentions.users.first() || message.author;
+        const data = userData(message.guild.id, target.id);
+        await reply(message, `Nivel de ${target.username}`, `Nivel: **${data.level}**\nXP: **${data.xp}/${(data.level + 1) * 100}**`);
+        break;
+      }
+
+      case "rank": {
+        const ranking = Object.entries(g.users)
+          .sort((a, b) => (b[1].level * 100 + b[1].xp) - (a[1].level * 100 + a[1].xp))
+          .slice(0, 10);
+        const lines = ranking.map(([id, data], i) =>
+          `**${i + 1}.** <@${id}> — nivel ${data.level}, ${data.xp} XP`
+        );
+        await reply(message, "Clasificación", lines.join("\n") || "Aún no hay niveles.");
+        break;
+      }
+
+      case "welcome":
+      case "goodbye":
+      case "logs": {
+        if (!isAdmin(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de administración para usar este comando.");
+          break;
+        }
+        const channel = message.mentions.channels.first();
+        const value = (args[0] || "").toLowerCase();
+        const key = name === "welcome" ? "welcome" : name === "goodbye" ? "goodbye" : "logs";
+
+        if (value === "off" || value === "desactivar") {
+          cfg[key] = null;
           save();
-          return reply(message, "Configuración actualizada", `${option}: desactivado.`);
+          await reply(message, "Configuración actualizada", `Se desactivó **${key}**.`);
+          break;
         }
 
-        if (!channel || !channel.isTextBased()) {
-          return reply(message, "Falta un canal", `Usa \`Madmin ${option} #canal\` o \`Madmin ${option} off\`.`);
+        if (!channel || channel.type !== ChannelType.GuildText) {
+          await reply(message, "Canal inválido", `Usa \`M${name} #canal\` o \`M${name} off\`.`);
+          break;
+        }
+        cfg[key] = channel.id;
+        save();
+        await reply(message, "Configuración actualizada", `**${key}** se enviará en ${channel}.`);
+        break;
+      }
+
+      case "antilink":
+      case "antispam": {
+        if (!isAdmin(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de administración.");
+          break;
+        }
+        const value = (args[0] || "").toLowerCase();
+        if (!["on", "off", "activar", "desactivar"].includes(value)) {
+          await reply(message, "Uso", `Usa \`M${name} on\` o \`M${name} off\`.`);
+          break;
+        }
+        cfg[name] = value === "on" || value === "activar";
+        save();
+        await reply(message, "Configuración actualizada", `${name} está **${cfg[name] ? "activado" : "desactivado"}**.`);
+        break;
+      }
+
+      case "admin": {
+        if (!isAdmin(message.member)) {
+          await reply(message, "Sin permiso", "Solo el equipo de administración puede usar este panel.");
+          break;
         }
 
-        settings[key] = channel.id;
-        save();
-        return reply(message, "Configuración actualizada", `${option}: ${channel}.`);
-      }
-
-      if (["antilink", "antispam"].includes(option)) {
-        if (!["on", "off"].includes(value)) {
-          return reply(message, "Uso incorrecto", `Usa \`Madmin ${option} on\` o \`Madmin ${option} off\`.`);
+        const section = (args[0] || "").toLowerCase();
+        if (!section) {
+          const menu = new StringSelectMenuBuilder()
+            .setCustomId("akari_help")
+            .setPlaceholder("Consulta las categorías de ayuda")
+            .addOptions(helpOptions);
+          await message.reply({
+            embeds: [
+              embed(
+                "Panel de administración",
+                "Configuración disponible:\n`Mwelcome #canal/off`\n`Mgoodbye #canal/off`\n`Mlogs #canal/off`\n`Mantilink on/off`\n`Mantispam on/off`\n`Maddadmin @usuario`\n`Mremoveadmin @usuario`\n`Mlistadmin`\n\nModeración: `Mkick`, `Mban`, `Mmute`, `Munmute`, `Mwarn`, `Mclear`"
+              )
+            ],
+            components: [new ActionRowBuilder().addComponents(menu)]
+          });
+          break;
         }
 
-        settings[option === "antilink" ? "antiLink" : "antiSpam"] = enabled;
+        if (section === "welcome" || section === "goodbye" || section === "logs") {
+          const channel = message.mentions.channels.first();
+          const key = section;
+          if ((args[1] || "").toLowerCase() === "off") {
+            cfg[key] = null;
+          } else if (channel && channel.type === ChannelType.GuildText) {
+            cfg[key] = channel.id;
+          } else {
+            await reply(message, "Uso", `Madmin ${section} #canal o Madmin ${section} off`);
+            break;
+          }
+          save();
+          await reply(message, "Configuración guardada", `${section}: ${cfg[key] ? `<#${cfg[key]}>` : "desactivado"}`);
+          break;
+        }
+
+        if (section === "antilink" || section === "antispam") {
+          const value = (args[1] || "").toLowerCase();
+          if (!["on", "off"].includes(value)) {
+            await reply(message, "Uso", `Madmin ${section} on/off`);
+            break;
+          }
+          cfg[section] = value === "on";
+          save();
+          await reply(message, "Configuración guardada", `${section}: **${value}**`);
+          break;
+        }
+
+        await reply(message, "Opción desconocida", "Usa `Madmin` para ver las opciones.");
+        break;
+      }
+
+      case "addadmin":
+      case "removeadmin": {
+        if (!isAdmin(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de administración.");
+          break;
+        }
+        const target = message.mentions.users.first();
+        if (!target) {
+          await reply(message, "Uso", `Usa \`M${name} @usuario\`.`);
+          break;
+        }
+        if (target.id === OWNER_ID) {
+          await reply(message, "Acción no permitida", "No puedes modificar al propietario configurado.");
+          break;
+        }
+        if (name === "addadmin") {
+          if (!g.admins.includes(target.id)) g.admins.push(target.id);
+        } else {
+          g.admins = g.admins.filter(id => id !== target.id);
+        }
         save();
-        return reply(message, "Seguridad actualizada", `${option}: **${enabled ? "activado" : "desactivado"}**.`);
+        await reply(message, "Administradores", `${target} ${name === "addadmin" ? "añadido/a a" : "eliminado/a de"} la lista.`);
+        break;
       }
 
-      return reply(message, "Ajuste desconocido",
-        "Opciones: `welcome`, `goodbye`, `logs`, `antilink`, `antispam`.");
-    }
+      case "listadmin":
+        if (!isAdmin(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de administración.");
+          break;
+        }
+        await reply(message, "Administradores", g.admins.length ? g.admins.map(id => `<@${id}>`).join("\n") : "No hay administradores añadidos.");
+        break;
 
-    if (["addadmin", "removeadmin", "listadmin"].includes(command)) {
-      if (!isOwner(message)) {
-        return reply(message, "Acceso denegado", "Solo el propietario configurado de Akari Bot puede gestionar los roles autorizados.");
+      case "kick":
+      case "ban": {
+        if (!isModerator(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de moderación.");
+          break;
+        }
+        const target = getTarget(message, args);
+        const reason = args.slice(target && message.mentions.members.first() ? 1 : target ? 1 : 0).join(" ") || "Sin motivo especificado";
+
+        if (!target) {
+          await reply(message, "Uso incorrecto", `Usa \`M${name} @usuario motivo\`.`);
+          break;
+        }
+        if (target.id === message.author.id || target.id === client.user.id ||
+            target.id === OWNER_ID || !target.manageable) {
+          await reply(message, "Acción no permitida", "No puedo moderar a ese miembro por permisos o jerarquía de roles.");
+          break;
+        }
+
+        if (name === "kick") {
+          await target.kick(reason);
+        } else {
+          if (!target.bannable) {
+            await reply(message, "Sin permiso", "Mi rol no puede expulsar permanentemente a ese miembro.");
+            break;
+          }
+          await target.ban({ reason });
+        }
+        await reply(message, "Moderación completada", `${target.user.tag} fue ${name === "kick" ? "expulsado/a" : "baneado/a"}.\nMotivo: ${reason}`);
+        await sendLog(message.guild, `${name}: ${target.user.tag}. Motivo: ${reason}`);
+        break;
       }
 
-      if (command === "listadmin") {
-        const roles = settings.admins.map(id => `<@&${id}>`).join("\n");
-        return reply(message, "Roles autorizados", roles || "No hay roles adicionales autorizados.");
+      case "mute": {
+        if (!isModerator(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de moderación.");
+          break;
+        }
+        const target = getTarget(message, args);
+        const durationArg = args.find(a => /^\d+$/.test(a));
+        const minutes = Number(durationArg);
+        if (!target || !Number.isInteger(minutes) || minutes < 1 || minutes > 40320) {
+          await reply(message, "Uso incorrecto", "Usa `Mmute @usuario minutos motivo` (máximo 28 días).");
+          break;
+        }
+        if (target.id === message.author.id || target.id === OWNER_ID || !target.moderatable) {
+          await reply(message, "Acción no permitida", "No puedo aplicar timeout a ese miembro.");
+          break;
+        }
+        const reason = args.filter(a => a !== durationArg && !/^<@!?\d+>$/.test(a)).join(" ") || "Sin motivo";
+        await target.timeout(minutes * 60_000, reason);
+        await reply(message, "Timeout aplicado", `${target.user.tag} tendrá timeout por **${minutes} minutos**.`);
+        await sendLog(message.guild, `Timeout: ${target.user.tag}, ${minutes} minutos. ${reason}`);
+        break;
       }
 
-      const role = message.mentions.roles.first();
-      if (!role) {
-        return reply(message, "Uso incorrecto", `Usa \`M${command} @rol\`.`);
+      case "unmute": {
+        if (!isModerator(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de moderación.");
+          break;
+        }
+        const target = getTarget(message, args);
+        if (!target) {
+          await reply(message, "Uso", "Usa `Munmute @usuario`.");
+          break;
+        }
+        if (!target.moderatable) {
+          await reply(message, "Sin permiso", "No puedo quitarle el timeout a ese miembro.");
+          break;
+        }
+        await target.timeout(null, "Timeout retirado por moderación");
+        await reply(message, "Timeout retirado", `Se retiró el timeout de ${target.user.tag}.`);
+        break;
       }
 
-      if (command === "addadmin") {
-        if (!settings.admins.includes(role.id)) settings.admins.push(role.id);
-        save();
-        return reply(message, "Rol autorizado", `${role} ya puede acceder a \`Madmin\` en este servidor.`);
+      case "warn": {
+        if (!isModerator(message.member)) {
+          await reply(message, "Sin permiso", "Necesitas permisos de moderación.");
+          break;
+        }
+        const target = getTarget(message, args);
+        if (!target || target.id === message.author.id || target.user.bot) {
+          await reply(message, "Uso", "Usa `Mwarn @usuario motivo`.");
+          break;
+        }
+        const data = userData(message.guild.id, target.id);
+        data.warns++;
+        const reason = args.filter(a => !/^<@!?\d+>$/.test(a)).join(" ") || "Sin motivo";
+        await reply(message, "Advertencia", `${target.user.tag} recibió una advertencia (**${data.warns}**).\nMotivo: ${reason}`);
+        await sendLog(message.guild, `Advertencia para ${target.user.tag}: ${reason}. Total: ${data.warns}`);
+        break;
       }
 
-      settings.admins = settings.admins.filter(id => id !== role.id);
-      save();
-      return reply(message, "Rol eliminado", `${role} ya no tiene acceso adicional a \`Madmin\`.`);
-    }
-
-    // ================ MODERACIÓN ================
-
-    if (["kick", "ban", "mute", "unmute", "warn", "clear"].includes(command)) {
-      if (!message.member.permissions.has(PermissionFlagsBits.Administrator) &&
-          !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
-          !message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-        return reply(message, "Permiso insuficiente", "Necesitas permisos de moderación.");
-      }
-
-      if (command === "clear") {
+      case "clear": {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-          return reply(message, "Permiso insuficiente", "Necesitas Gestionar mensajes.");
+          await reply(message, "Sin permiso", "Necesitas el permiso Gestionar mensajes.");
+          break;
         }
-
         const amount = Number(args[0]);
         if (!Number.isInteger(amount) || amount < 1 || amount > 100) {
-          return reply(message, "Uso incorrecto", "Usa `Mclear 1-100`.");
+          await reply(message, "Cantidad inválida", "Usa `Mclear 1-100`.");
+          break;
+        }
+        const deleted = await message.channel.bulkDelete(amount + 1, true);
+        const notice = await message.channel.send(`🌸 Se eliminaron ${Math.max(0, deleted.size - 1)} mensajes.`);
+        setTimeout(() => notice.delete().catch(() => {}), 4000);
+        break;
+      }
+
+      case "ticket": {
+        if (!message.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
+          await reply(message, "Permiso faltante", "Necesito el permiso Gestionar canales.");
+          break;
         }
 
-        const deleted = await message.channel.bulkDelete(amount, true).catch(() => null);
-        if (!deleted) return reply(message, "No se pudo borrar", "Discord no permitió borrar esos mensajes.");
-        return reply(message, "Mensajes eliminados", `Se eliminaron **${deleted.size}** mensajes.`);
-      }
-
-      const target = message.mentions.members.first();
-      if (!target) return reply(message, "Falta usuario", `Usa \`M${command} @usuario\`.`);
-      if (target.id === message.author.id || target.id === OWNER_ID) {
-        return reply(message, "Acción bloqueada", "No puedes aplicar esa acción a ese usuario.");
-      }
-
-      const reason = args.slice(1).join(" ") || "Sin razón indicada";
-
-      if (command === "kick") {
-        if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-          return reply(message, "Permiso insuficiente", "Necesitas Expulsar miembros.");
+        const existing = message.guild.channels.cache.find(
+          c => c.type === ChannelType.GuildText &&
+            c.topic === `Akari ticket owner:${message.author.id}`
+        );
+        if (existing) {
+          await reply(message, "Ticket existente", `Ya tienes un ticket abierto: ${existing}`);
+          break;
         }
-        if (!target.kickable) return reply(message, "No se pudo expulsar", "Revisa la jerarquía de roles y permisos.");
-        await target.kick(reason);
-        await logAction(message.guild, `${target.user.tag} fue expulsado. Razón: ${reason}`);
-        return reply(message, "Usuario expulsado", `${target.user.tag}\nRazón: ${reason}`);
+
+        const channel = await message.guild.channels.create({
+          name: `ticket-${message.author.username}`.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 90),
+          type: ChannelType.GuildText,
+          topic: `Akari ticket owner:${message.author.id}`,
+          permissionOverwrites: [
+            { id: message.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+            {
+              id: message.author.id,
+              allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory
+              ]
+            },
+            {
+              id: client.user.id,
+              allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+                PermissionFlagsBits.ManageChannels
+              ]
+            }
+          ]
+        });
+
+        await channel.send({
+          content: `${message.author}`,
+          embeds: [embed("Ticket abierto", "Explica tu consulta y el equipo de Akari te ayudará.\nCierra el ticket con `Mclose`.")]
+        });
+        await reply(message, "Ticket creado", `Tu ticket está aquí: ${channel}`);
+        break;
       }
 
-      if (command === "ban") {
-        if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-          return reply(message, "Permiso insuficiente", "Necesitas Banear miembros.");
+      case "close": {
+        const channel = message.channel;
+        if (
+          channel.type !== ChannelType.GuildText ||
+          !channel.topic?.startsWith("Akari ticket owner:")
+        ) {
+          await reply(message, "No es un ticket", "Este comando solo funciona dentro de un ticket.");
+          break;
         }
-        if (!target.bannable) return reply(message, "No se pudo banear", "Revisa la jerarquía de roles y permisos.");
-        await target.ban({ reason });
-        await logAction(message.guild, `${target.user.tag} fue baneado. Razón: ${reason}`);
-        return reply(message, "Usuario baneado", `${target.user.tag}\nRazón: ${reason}`);
+        const ownerId = channel.topic.split("owner:")[1];
+        if (message.author.id !== ownerId && !isModerator(message.member)) {
+          await reply(message, "Sin permiso", "Solo quien abrió el ticket o un moderador puede cerrarlo.");
+          break;
+        }
+        await reply(message, "Ticket cerrado", "Este canal se eliminará en 3 segundos.");
+        setTimeout(() => channel.delete("Ticket cerrado").catch(() => {}), 3000);
+        break;
       }
 
-      if (command === "mute") {
-        if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-          return reply(message, "Permiso insuficiente", "Necesitas Moderar miembros.");
-        }
-        const minutes = Number(args[1]);
-        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 40320) {
-          return reply(message, "Duración inválida", "Usa `Mmute @usuario minutos [razón]`.");
-        }
-        if (!target.moderatable) return reply(message, "No se pudo silenciar", "Revisa la jerarquía de roles.");
-        await target.timeout(minutes * 60000, reason);
-        await logAction(message.guild, `${target.user.tag} recibió timeout de ${minutes} minutos. ${reason}`);
-        return reply(message, "Timeout aplicado", `${target.user.tag}: **${minutes} minutos**.`);
-      }
-
-      if (command === "unmute") {
-        if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-          return reply(message, "Permiso insuficiente", "Necesitas Moderar miembros.");
-        }
-        if (!target.moderatable) return reply(message, "No se pudo quitar", "Revisa la jerarquía de roles.");
-        await target.timeout(null, reason);
-        return reply(message, "Timeout eliminado", `Se quitó el timeout de ${target.user.tag}.`);
-      }
-
-      if (command === "warn") {
-        const u = getUser(target.id);
-        u.warnings++;
-        save();
-        await logAction(message.guild, `${target.user.tag} recibió una advertencia. Total: ${u.warnings}. Razón: ${reason}`);
-        return reply(message, "Advertencia registrada", `${target.user.tag} tiene **${u.warnings}** advertencia(s).\nRazón: ${reason}`);
-      }
+      default:
+        // Los comandos inexistentes no generan spam.
+        break;
     }
-
-    // ================ TICKETS ================
-
-    if (command === "ticket") {
-      const existing = message.guild.channels.cache.find(
-        c => c.type === ChannelType.GuildText &&
-          c.name === `ticket-${message.author.id}`
-      );
-
-      if (existing) {
-        return reply(message, "Ya tienes un ticket", `Puedes continuar aquí: ${existing}`);
-      }
-
-      const channel = await message.guild.channels.create({
-        name: `ticket-${message.author.id}`,
-        type: ChannelType.GuildText,
-        topic: `Ticket de ${message.author.tag} (${message.author.id})`,
-        permissionOverwrites: [
-          { id: message.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-          { id: message.author.id, allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory
-          ] },
-          { id: client.user.id, allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ManageChannels,
-            PermissionFlagsBits.ReadMessageHistory
-          ] }
-        ]
-      }).catch(() => null);
-
-      if (!channel) return reply(message, "Error al crear ticket", "Revisa los permisos del bot.");
-
-      await channel.send({
-        content: `${message.author}`,
-        embeds: [embed("Ticket abierto 🎟️", "Describe tu consulta. El equipo de soporte te ayudará pronto.\nUsa `Mclose` para cerrar este ticket.")]
-      });
-
-      return reply(message, "Ticket creado", `Tu ticket está aquí: ${channel}`);
-    }
-
-    if (command === "close") {
-      if (!message.channel.name.startsWith("ticket-")) {
-        return reply(message, "Esto no es un ticket", "Usa `Mclose` dentro de tu canal de ticket.");
-      }
-
-      const ownerId = message.channel.name.slice("ticket-".length);
-      if (message.author.id !== ownerId && !isAdmin(message)) {
-        return reply(message, "Acceso denegado", "Solo quien abrió el ticket o el equipo autorizado puede cerrarlo.");
-      }
-
-      await reply(message, "Ticket cerrado", "Este canal se eliminará en unos segundos.");
-      setTimeout(() => message.channel.delete("Ticket cerrado").catch(() => {}), 3000);
-      return;
-    }
-
-    save();
   } catch (error) {
-    console.error(`Error en M${command}:`, error);
-    await message.reply({
-      embeds: [embed("Ocurrió un error", "No pude completar esa acción. Revisa mis permisos y la consola de Render.")],
-      allowedMentions: { repliedUser: false }
-    }).catch(() => {});
+    console.error(`Error en M${name}:`, error);
+    try {
+      await message.reply({
+        embeds: [
+          embed("Error del comando", "No pude completar esta acción. Revisa los permisos del bot y los registros de Render.")
+        ]
+      });
+    } catch {}
+  } finally {
+    save();
   }
 });
 
-client.on("error", error => console.error("Discord client error:", error));
-process.on("unhandledRejection", error => console.error("Promesa rechazada:", error));
+// Servidor HTTP para que Render detecte el puerto.
+const PORT = Number(process.env.PORT) || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("Akari Bot está funcionando 🌸");
+}).listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor HTTP activo en el puerto ${PORT}`);
+});
 
-client.login(TOKEN);
+client.login(TOKEN).catch(error => {
+  console.error("No se pudo iniciar sesión en Discord:", error);
+  process.exit(1);
+});

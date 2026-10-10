@@ -10,1258 +10,1386 @@ const {
   ChannelType,
   PermissionFlagsBits
 } = require("discord.js");
+
 const { Pool } = require("pg");
-// =============================
-// AKARI BOT - CONFIGURACIÓN
-// =============================
+
 const PREFIX = "M!";
 const PINK = 0xFF9DCC;
+
+console.log("🌸 AKARI: index.js se está ejecutando...");
+
+// =========================
+// VARIABLES
+// =========================
+
 if (!process.env.DISCORD_TOKEN) {
-  throw new Error("Falta la variable DISCORD_TOKEN.");
+  console.error("❌ Falta DISCORD_TOKEN en las variables de entorno.");
+  process.exit(1);
 }
+
 if (!process.env.DATABASE_URL) {
-  throw new Error("Falta la variable DATABASE_URL de PostgreSQL.");
+  console.error("❌ Falta DATABASE_URL en las variables de entorno.");
+  process.exit(1);
 }
-// PostgreSQL de Render requiere SSL/TLS
+
+console.log("🌸 AKARI: variables de entorno encontradas.");
+
+// =========================
+// POSTGRESQL
+// =========================
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+
+  // Render PostgreSQL normalmente necesita SSL
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+
+  // Evita que se quede esperando indefinidamente
+  connectionTimeoutMillis: 10000,
+
+  // Mantener las conexiones controladas
+  max: 5
 });
+
+pool.on("error", (err) => {
+  console.error("❌ Error de PostgreSQL:", err.message);
+});
+
+// =========================
+// DISCORD
+// =========================
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.MessageContent
   ],
-  partials: [Partials.Channel]
+
+  partials: [
+    Partials.Channel,
+    Partials.Message,
+    Partials.User
+  ]
 });
-const embed = (title, description) =>
-  new EmbedBuilder()
-    .setColor(PINK)
-    .setTitle(`🌸 ${title}`)
-    .setDescription(description)
-    .setFooter({ text: "Akari Bot • Comunidad" })
-    .setTimestamp();
-const money = n => Number(n).toLocaleString("es-ES") + " monedas";
-const errorMessage = (channel, message) =>
-  channel.send({ embeds: [embed("Ups", `❌ ${message}`)] });
-const isAdmin = member =>
-  member.permissions.has(PermissionFlagsBits.Administrator) ||
-  member.permissions.has(PermissionFlagsBits.ManageGuild);
-const isModerator = member =>
-  member.permissions.has(PermissionFlagsBits.Administrator) ||
-  member.permissions.has(PermissionFlagsBits.ModerateMembers);
-const mention = user => `<@${user.id}>`;
+
+// =========================
+// BASE DE DATOS
+// =========================
+
 async function initDatabase() {
+  console.log("🌸 Creando/verificando tablas...");
+
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS akari_users (
+    CREATE TABLE IF NOT EXISTS users (
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
-      balance BIGINT NOT NULL DEFAULT 100,
-      last_work BIGINT NOT NULL DEFAULT 0,
-      last_daily BIGINT NOT NULL DEFAULT 0,
+      coins BIGINT DEFAULT 0,
+      daily BIGINT DEFAULT 0,
+      work BIGINT DEFAULT 0,
       PRIMARY KEY (guild_id, user_id)
     );
-    CREATE TABLE IF NOT EXISTS akari_settings (
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS settings (
       guild_id TEXT PRIMARY KEY,
-      welcome_channel TEXT
+      welcome_channel TEXT,
+      welcome_message TEXT
     );
-    CREATE TABLE IF NOT EXISTS akari_tickets (
-      channel_id TEXT PRIMARY KEY,
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
-      owner_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open'
+      user_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE IF NOT EXISTS akari_warnings (
-      id BIGSERIAL PRIMARY KEY,
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS warnings (
+      id SERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       moderator_id TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS akari_reputation (
-      guild_id TEXT NOT NULL,
-      giver_id TEXT NOT NULL,
-      target_id TEXT NOT NULL,
-      given_at BIGINT NOT NULL,
-      PRIMARY KEY (guild_id, giver_id)
+      reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  console.log("🌸 Base de datos de Akari preparada.");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reputation (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      reputation INTEGER DEFAULT 0,
+      PRIMARY KEY (guild_id, user_id)
+    );
+  `);
+
+  console.log("✅ Tablas verificadas correctamente.");
 }
-async function getAccount(guildId, userId) {
+
+// =========================
+// FUNCIONES DE USUARIO
+// =========================
+
+async function ensureUser(guildId, userId) {
   await pool.query(
-    `INSERT INTO akari_users (guild_id, user_id)
-     VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    `
+    INSERT INTO users (guild_id, user_id)
+    VALUES ($1, $2)
+    ON CONFLICT (guild_id, user_id)
+    DO NOTHING
+    `,
     [guildId, userId]
   );
+}
+
+async function getUser(guildId, userId) {
+  await ensureUser(guildId, userId);
+
   const result = await pool.query(
-    `SELECT * FROM akari_users
-     WHERE guild_id = $1 AND user_id = $2`,
+    `
+    SELECT *
+    FROM users
+    WHERE guild_id = $1 AND user_id = $2
+    `,
     [guildId, userId]
   );
+
   return result.rows[0];
 }
-async function changeBalance(guildId, userId, amount) {
-  await getAccount(guildId, userId);
-  await pool.query(
-    `UPDATE akari_users
-     SET balance = balance + $3
-     WHERE guild_id = $1 AND user_id = $2`,
-    [guildId, userId, amount]
-  );
-}
-function parseDuration(input) {
-  const match = /^(\d+)(s|m|h|d)$/i.exec(input || "");
-  if (!match) return null;
-  const value = Number(match[1]);
-  const unit = match[2].toLowerCase();
-  const multiplier = {
-    s: 1000,
-    m: 60000,
-    h: 3600000,
-    d: 86400000
-  }[unit];
-  const result = value * multiplier;
-  if (result < 1000 || result > 28 * 86400000) return null;
-  return result;
-}
-function parseAmount(input) {
-  if (!/^\d+$/.test(input || "")) return null;
-  const amount = Number(input);
-  if (!Number.isSafeInteger(amount) || amount <= 0) return null;
-  return amount;
-}
-// =============================
-// INICIO
-// =============================
+
+// =========================
+// READY
+// =========================
+
 client.once("ready", () => {
-  console.log(`🌸 ${client.user.tag} está conectado.`);
+  console.log("=================================");
+  console.log(`🌸 Akari Bot conectado.`);
+  console.log(`🤖 Usuario: ${client.user.tag}`);
+  console.log(`🏠 Servidores: ${client.guilds.cache.size}`);
+  console.log("=================================");
+
   client.user.setPresence({
-    activities: [{ name: "Akari Community 🌸" }],
+    activities: [
+      {
+        name: "Akari Community 🌸"
+      }
+    ],
     status: "online"
   });
 });
-// =============================
+
+// =========================
 // BIENVENIDAS
-// =============================
-client.on("guildMemberAdd", async member => {
+// =========================
+
+client.on("guildMemberAdd", async (member) => {
   try {
     const result = await pool.query(
-      "SELECT welcome_channel FROM akari_settings WHERE guild_id = $1",
+      `
+      SELECT welcome_channel, welcome_message
+      FROM settings
+      WHERE guild_id = $1
+      `,
       [member.guild.id]
     );
-    const channelId = result.rows[0]?.welcome_channel;
-    if (!channelId) return;
-    const channel = await member.guild.channels
-      .fetch(channelId)
-      .catch(() => null);
-    if (channel?.isTextBased()) {
-      await channel.send({
-        embeds: [
-          embed(
-            "¡Una nueva personita!",
-            `🌸 ¡Bienvenido/a ${mention(member.user)} a **${member.guild.name}**!\n\n¡Esperamos que disfrutes de Akari Community! 💗`
-          )
-        ]
-      });
-    }
+
+    if (!result.rows.length) return;
+
+    const settings = result.rows[0];
+
+    if (!settings.welcome_channel) return;
+
+    const channel = member.guild.channels.cache.get(
+      settings.welcome_channel
+    );
+
+    if (!channel) return;
+
+    const message =
+      settings.welcome_message ||
+      `🌸 ¡Bienvenido/a ${member} a **${member.guild.name}**!`;
+
+    await channel.send(
+      message
+        .replace("{user}", `${member}`)
+        .replace("{username}", member.user.username)
+        .replace("{server}", member.guild.name)
+    );
   } catch (error) {
-    console.error("Error en bienvenida:", error);
+    console.error("❌ Error en bienvenida:", error);
   }
 });
-// =============================
-// COMANDOS DE MENSAJE
-// =============================
-client.on("messageCreate", async message => {
-  if (!message.guild || message.author.bot) return;
-  if (!message.content
-    .toLowerCase()
-    .startsWith(PREFIX.toLowerCase())) return;
-  const input = message.content.slice(PREFIX.length).trim();
-  if (!input) return;
-  const args = input.split(/\s+/);
-  const command = args.shift().toLowerCase();
-  const target = message.mentions.members.first();
-  const guildId = message.guild.id;
-  const userId = message.author.id;
+
+// =========================
+// MENSAJES
+// =========================
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+  if (!message.guild) return;
+
+  if (!message.content.startsWith(PREFIX)) return;
+
+  const args = message.content
+    .slice(PREFIX.length)
+    .trim()
+    .split(/\s+/);
+
+  const command = args.shift()?.toLowerCase();
+
+  if (!command) return;
+
   try {
-    // =============================
-    // AYUDA PÚBLICA
-    // =============================
+    await ensureUser(
+      message.guild.id,
+      message.author.id
+    );
+
+    // =========================
+    // HELP
+    // =========================
+
     if (command === "help" || command === "ayuda") {
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Comandos de Akari",
-            "**💰 Economía**\n" +
-            "`M!balance` · `M!daily` · `M!work` · `M!pay` · `M!shop`\n\n" +
-            "**🎮 Minijuegos**\n" +
-            "`M!coin cara 50` · `M!dice 4 50` · `M!guess`\n\n" +
-            "**💗 Social**\n" +
-            "`M!profile` · `M!hug @usuario` · `M!friend @usuario` · `M!rep @usuario`\n\n" +
-            "**🌸 General**\n" +
-            "`M!help` · `M!ping`\n\n" +
-            "Los comandos de moderación y administración son privados."
-          )
-        ]
-      });
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle("🌸 Akari Bot")
+        .setDescription(
+          `Bienvenido/a a **Akari Bot** 🌸\n\n` +
+          `Usa los menús para explorar mis comandos.`
+        )
+        .addFields(
+          {
+            name: "💰 Economía",
+            value:
+              "`M!balance` `M!daily` `M!work` `M!pay` `M!shop`",
+            inline: false
+          },
+          {
+            name: "🎮 Diversión",
+            value:
+              "`M!coin` `M!dice` `M!guess`",
+            inline: false
+          },
+          {
+            name: "💗 Social",
+            value:
+              "`M!profile` `M!hug` `M!friend` `M!rep`",
+            inline: false
+          },
+          {
+            name: "🛠️ Utilidades",
+            value:
+              "`M!ping`",
+            inline: false
+          }
+        )
+        .setFooter({
+          text: "Akari Community 🌸"
+        });
+
+      return message.reply({ embeds: [embed] });
     }
+
+    // =========================
+    // PING
+    // =========================
+
     if (command === "ping") {
       return message.reply(
-        `🏓 ¡Pong! Latencia: ${client.ws.ping} ms.`
+        `🏓 Pong!\nLatencia: **${client.ws.ping}ms**`
       );
     }
-    // =============================
-    // ECONOMÍA
-    // =============================
+
+    // =========================
+    // BALANCE
+    // =========================
+
     if (
       command === "balance" ||
       command === "bal" ||
-      command === "dinero"
+      command === "coins"
     ) {
-      const member = target?.user || message.author;
-      const account = await getAccount(
-        guildId,
-        member.id
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Cartera 💰",
-            `${mention(member)} tiene **${money(account.balance)}**.`
-          )
-        ]
-      });
+
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle("💰 Tu balance")
+        .setDescription(
+          `${message.author}, tienes **${user.coins} monedas** 🌸`
+        );
+
+      return message.reply({ embeds: [embed] });
     }
+
+    // =========================
+    // DAILY
+    // =========================
+
     if (command === "daily") {
-      const account = await getAccount(
-        guildId,
-        userId
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
+
       const now = Date.now();
-      const cooldown = 24 * 60 * 60 * 1000;
-      const remaining =
-        cooldown - (now - Number(account.last_daily));
-      if (remaining > 0) {
-        const hours = Math.ceil(
+
+      if (user.daily && now - Number(user.daily) < 86400000) {
+        const remaining =
+          86400000 - (now - Number(user.daily));
+
+        const hours = Math.floor(
           remaining / 3600000
         );
-        return errorMessage(
-          message.channel,
-          `Ya reclamaste tu recompensa. Vuelve en aproximadamente ${hours} h.`
+
+        const minutes = Math.floor(
+          (remaining % 3600000) / 60000
+        );
+
+        return message.reply(
+          `⏰ Ya reclamaste tu recompensa diaria.\n` +
+          `Vuelve en **${hours}h ${minutes}m**.`
         );
       }
-      const reward = 300;
-      const result = await pool.query(
-        `UPDATE akari_users
-         SET balance = balance + $3,
-             last_daily = $4
-         WHERE guild_id = $1
-         AND user_id = $2
-         AND last_daily = $5`,
+
+      const reward =
+        Math.floor(Math.random() * 201) + 300;
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins + $1,
+            daily = $2
+        WHERE guild_id = $3 AND user_id = $4
+        `,
         [
-          guildId,
-          userId,
           reward,
           now,
-          account.last_daily
+          message.guild.id,
+          message.author.id
         ]
       );
-      if (!result.rowCount) {
-        return errorMessage(
-          message.channel,
-          "Tu cuenta cambió al mismo tiempo. Inténtalo de nuevo."
-        );
-      }
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Recompensa diaria",
-            `🎁 Recibiste **${money(reward)}**.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `🌸 Has recibido **${reward} monedas** de recompensa diaria.`
+      );
     }
-    if (
-      command === "work" ||
-      command === "trabajar"
-    ) {
-      const account = await getAccount(
-        guildId,
-        userId
+
+    // =========================
+    // WORK
+    // =========================
+
+    if (command === "work") {
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
+
       const now = Date.now();
-      const cooldown = 30 * 1000;
-      const remaining =
-        cooldown - (now - Number(account.last_work));
-      if (remaining > 0) {
-        return errorMessage(
-          message.channel,
-          `Estás descansando. Espera ${Math.ceil(remaining / 1000)} segundos.`
+
+      if (user.work && now - Number(user.work) < 30000) {
+        const remaining =
+          30000 - (now - Number(user.work));
+
+        return message.reply(
+          `⏰ Debes esperar **${Math.ceil(
+            remaining / 1000
+          )} segundos**.`
         );
       }
+
       const reward =
         Math.floor(Math.random() * 201) + 100;
-      const result = await pool.query(
-        `UPDATE akari_users
-         SET balance = balance + $3,
-             last_work = $4
-         WHERE guild_id = $1
-         AND user_id = $2
-         AND last_work = $5`,
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins + $1,
+            work = $2
+        WHERE guild_id = $3 AND user_id = $4
+        `,
         [
-          guildId,
-          userId,
           reward,
           now,
-          account.last_work
+          message.guild.id,
+          message.author.id
         ]
       );
-      if (!result.rowCount) {
-        return errorMessage(
-          message.channel,
-          "Inténtalo otra vez en un momento."
-        );
-      }
-      return message.channel.send({
-        embeds: [
-          embed(
-            "¡Buen trabajo!",
-            `💼 Ganaste **${money(reward)}**.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `💼 Trabajaste y ganaste **${reward} monedas**.`
+      );
     }
-    if (
-      command === "pay" ||
-      command === "pagar"
-    ) {
+
+    // =========================
+    // PAY
+    // =========================
+
+    if (command === "pay") {
+      const target =
+        message.mentions.users.first();
+
+      const amount = Number(args[1]);
+
       if (!target) {
-        return errorMessage(
-          message.channel,
-          "Menciona a quien quieras pagar."
+        return message.reply(
+          "❌ Menciona a la persona a la que quieres pagar."
         );
       }
+
       if (
-        target.id === userId ||
-        target.user.bot
+        !amount ||
+        amount <= 0 ||
+        !Number.isInteger(amount)
       ) {
-        return errorMessage(
-          message.channel,
-          "No puedes pagarle a esa cuenta."
+        return message.reply(
+          "❌ Especifica una cantidad válida."
         );
       }
-      const amount = parseAmount(args[1]);
-      if (!amount) {
-        return errorMessage(
-          message.channel,
-          "Uso: `M!pay @usuario cantidad`."
+
+      if (target.id === message.author.id) {
+        return message.reply(
+          "❌ No puedes pagarte a ti mismo."
         );
       }
-      const sender = await getAccount(
-        guildId,
-        userId
+
+      const sender = await getUser(
+        message.guild.id,
+        message.author.id
       );
-      await getAccount(
-        guildId,
+
+      await ensureUser(
+        message.guild.id,
         target.id
       );
-      const result = await pool.query(
-        `UPDATE akari_users
-         SET balance = balance - $3
-         WHERE guild_id = $1
-         AND user_id = $2
-         AND balance >= $3`,
+
+      if (Number(sender.coins) < amount) {
+        return message.reply(
+          "❌ No tienes suficientes monedas."
+        );
+      }
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins - $1
+        WHERE guild_id = $2 AND user_id = $3
+        `,
         [
-          guildId,
-          userId,
-          amount
+          amount,
+          message.guild.id,
+          message.author.id
         ]
       );
-      if (!result.rowCount) {
-        return errorMessage(
-          message.channel,
-          "No tienes suficientes monedas."
-        );
-      }
-      await changeBalance(
-        guildId,
-        target.id,
-        amount
-      );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Transferencia",
-            `💸 ${mention(message.author)} pagó **${money(amount)}** a ${mention(target.user)}.`
-          )
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins + $1
+        WHERE guild_id = $2 AND user_id = $3
+        `,
+        [
+          amount,
+          message.guild.id,
+          target.id
         ]
-      });
+      );
+
+      return message.reply(
+        `💸 Has enviado **${amount} monedas** a ${target}.`
+      );
     }
-    if (
-      command === "shop" ||
-      command === "tienda"
-    ) {
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Tienda de Akari",
-            "🌸 **Rosa mágica** — 500 monedas\n" +
-            "💎 **Cristal lunar** — 1.000 monedas\n" +
-            "⭐ **Estrella dorada** — 2.500 monedas\n\n" +
-            "La tienda muestra los artículos disponibles; las compras se añadirán en una siguiente versión."
-          )
-        ]
-      });
+
+    // =========================
+    // SHOP
+    // =========================
+
+    if (command === "shop" || command === "tienda") {
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle("🛍️ Tienda de Akari")
+        .setDescription(
+          "Actualmente puedes consultar tus monedas con `M!balance`.\n\n" +
+          "🌸 Próximamente habrá más objetos."
+        );
+
+      return message.reply({ embeds: [embed] });
     }
-    // =============================
-    // MINIJUEGOS
-    // =============================
-    if (
-      command === "coin" ||
-      command === "moneda"
-    ) {
-      const side = (args[0] || "").toLowerCase();
-      const amount = parseAmount(args[1]);
+
+    // =========================
+    // COIN
+    // =========================
+
+    if (command === "coin" || command === "flip") {
+      const choice =
+        args[0]?.toLowerCase();
+
       if (
-        !["cara", "cruz"].includes(side) ||
-        !amount
+        !["cara", "cruz"].includes(choice)
       ) {
-        return errorMessage(
-          message.channel,
-          "Uso: `M!coin cara 50` o `M!coin cruz 50`."
+        return message.reply(
+          "❌ Usa `M!coin cara` o `M!coin cruz`."
         );
       }
-      const account = await getAccount(
-        guildId,
-        userId
-      );
-      if (
-        Number(account.balance) < amount
-      ) {
-        return errorMessage(
-          message.channel,
-          "No tienes suficientes monedas."
-        );
-      }
+
       const resultSide =
         Math.random() < 0.5
           ? "cara"
           : "cruz";
-      const won = side === resultSide;
-      const delta = won
-        ? amount
-        : -amount;
-      await changeBalance(
-        guildId,
-        userId,
-        delta
+
+      const won =
+        choice === resultSide;
+
+      if (won) {
+        await pool.query(
+          `
+          UPDATE users
+          SET coins = coins + 100
+          WHERE guild_id = $1 AND user_id = $2
+          `,
+          [
+            message.guild.id,
+            message.author.id
+          ]
+        );
+      }
+
+      return message.reply(
+        `🪙 Salió **${resultSide}**.\n` +
+        (won
+          ? "🎉 ¡Ganaste **100 monedas**!"
+          : "😔 Perdiste.")
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Lanzamiento de moneda",
-            `🪙 Salió **${resultSide}**.\n` +
-            (delta > 0
-              ? `¡Ganaste ${money(amount)}!`
-              : `Perdiste ${money(amount)}.`)
-          )
-        ]
-      });
     }
-    if (
-      command === "dice" ||
-      command === "dados"
-    ) {
-      const guess = Number(args[0]);
-      const amount = parseAmount(args[1]);
-      if (
-        !Number.isInteger(guess) ||
-        guess < 1 ||
-        guess > 6 ||
-        !amount
-      ) {
-        return errorMessage(
-          message.channel,
-          "Uso: `M!dice 4 50` (elige un número del 1 al 6)."
-        );
-      }
-      const account = await getAccount(
-        guildId,
-        userId
-      );
-      if (
-        Number(account.balance) < amount
-      ) {
-        return errorMessage(
-          message.channel,
-          "No tienes suficientes monedas."
-        );
-      }
-      const rolled =
+
+    // =========================
+    // DICE
+    // =========================
+
+    if (command === "dice" || command === "dado") {
+      const result =
         Math.floor(Math.random() * 6) + 1;
-      const delta =
-        guess === rolled
-          ? amount * 4
-          : -amount;
-      await changeBalance(
-        guildId,
-        userId,
-        delta
+
+      return message.reply(
+        `🎲 El dado cayó en **${result}**.`
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Dados 🎲",
-            `Elegiste **${guess}** y salió **${rolled}**.\n` +
-            (delta > 0
-              ? `¡Ganaste ${money(delta)}!`
-              : `Perdiste ${money(amount)}.`)
-          )
-        ]
-      });
     }
-    if (
-      command === "guess" ||
-      command === "adivina"
-    ) {
-      const number =
-        Math.floor(Math.random() * 5) + 1;
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Adivinanza",
-            `🌸 Piensa un número del 1 al 5 y escribe cuál crees que salió: **${number}**.\n¡Esta ronda es gratis!`
-          )
-        ]
-      });
+
+    // =========================
+    // GUESS
+    // =========================
+
+    if (command === "guess") {
+      const number = Number(args[0]);
+
+      if (
+        !Number.isInteger(number) ||
+        number < 1 ||
+        number > 10
+      ) {
+        return message.reply(
+          "❌ Elige un número del 1 al 10."
+        );
+      }
+
+      const correct =
+        Math.floor(Math.random() * 10) + 1;
+
+      if (number === correct) {
+        await pool.query(
+          `
+          UPDATE users
+          SET coins = coins + 250
+          WHERE guild_id = $1 AND user_id = $2
+          `,
+          [
+            message.guild.id,
+            message.author.id
+          ]
+        );
+
+        return message.reply(
+          `🎯 ¡Acertaste! Era **${correct}**.\n` +
+          `💰 Ganaste **250 monedas**.`
+        );
+      }
+
+      return message.reply(
+        `❌ No era ese número. Era **${correct}**.`
+      );
     }
-    // =============================
-    // SOCIAL
-    // =============================
+
+    // =========================
+    // PROFILE
+    // =========================
+
     if (
       command === "profile" ||
       command === "perfil"
     ) {
-      const member =
-        target?.user || message.author;
-      const account = await getAccount(
-        guildId,
-        member.id
+      const target =
+        message.mentions.users.first() ||
+        message.author;
+
+      const user = await getUser(
+        message.guild.id,
+        target.id
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            `Perfil de ${member.username}`,
-            `👤 Usuario: ${mention(member)}\n` +
-            `💰 Saldo: **${money(account.balance)}**\n` +
-            `🌸 Servidor: **${message.guild.name}**`
-          ).setThumbnail(
-            member.displayAvatarURL()
-          )
+
+      const repResult = await pool.query(
+        `
+        SELECT reputation
+        FROM reputation
+        WHERE guild_id = $1 AND user_id = $2
+        `,
+        [
+          message.guild.id,
+          target.id
         ]
-      });
+      );
+
+      const rep =
+        repResult.rows[0]?.reputation || 0;
+
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle(`🌸 Perfil de ${target.username}`)
+        .setThumbnail(target.displayAvatarURL())
+        .addFields(
+          {
+            name: "💰 Monedas",
+            value: `${user.coins}`,
+            inline: true
+          },
+          {
+            name: "⭐ Reputación",
+            value: `${rep}`,
+            inline: true
+          }
+        );
+
+      return message.reply({ embeds: [embed] });
     }
-    if (
-      command === "hug" ||
-      command === "abrazo"
-    ) {
-      if (
-        !target ||
-        target.id === userId
-      ) {
-        return errorMessage(
-          message.channel,
-          "Menciona a otra persona para enviarle un abrazo."
+
+    // =========================
+    // HUG
+    // =========================
+
+    if (command === "hug") {
+      const target =
+        message.mentions.users.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona a alguien."
         );
       }
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Abrazo virtual 💗",
-            `🤗 ${mention(message.author)} le manda un abrazo a ${mention(target.user)}.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `🤗 ${message.author} le dio un abrazo a ${target}.`
+      );
     }
-    if (
-      command === "friend" ||
-      command === "amistad"
-    ) {
-      if (
-        !target ||
-        target.id === userId
-      ) {
-        return errorMessage(
-          message.channel,
-          "Menciona a otra persona."
+
+    // =========================
+    // FRIEND
+    // =========================
+
+    if (command === "friend") {
+      const target =
+        message.mentions.users.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona a alguien."
         );
       }
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Amistad 🌸",
-            `💞 ${mention(message.author)} y ${mention(target.user)} son amistades de Akari.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `💗 ${message.author} y ${target} ahora son amigos.`
+      );
     }
+
+    // =========================
+    // REP
+    // =========================
+
     if (command === "rep") {
-      if (
-        !target ||
-        target.id === userId ||
-        target.user.bot
-      ) {
-        return errorMessage(
-          message.channel,
-          "Menciona a otra persona, no a ti mismo."
+      const target =
+        message.mentions.users.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona a alguien."
         );
       }
-      const now = Date.now();
-      const last = await pool.query(
-        `SELECT given_at
-         FROM akari_reputation
-         WHERE guild_id = $1
-         AND giver_id = $2`,
-        [
-          guildId,
-          userId
-        ]
+
+      if (target.id === message.author.id) {
+        return message.reply(
+          "❌ No puedes darte reputación a ti mismo."
+        );
+      }
+
+      await ensureUser(
+        message.guild.id,
+        target.id
       );
-      if (
-        last.rows.length &&
-        now - Number(last.rows[0].given_at) < 86400000
-      ) {
-        return errorMessage(
-          message.channel,
-          "Puedes dar reputación una vez cada 24 horas."
-        );
-      }
+
       await pool.query(
-        `INSERT INTO akari_reputation
-         (guild_id, giver_id, target_id, given_at)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (guild_id, giver_id)
-         DO UPDATE SET
-         target_id = $3,
-         given_at = $4`,
+        `
+        INSERT INTO reputation
+          (guild_id, user_id, reputation)
+        VALUES ($1, $2, 1)
+        ON CONFLICT (guild_id, user_id)
+        DO UPDATE SET reputation =
+          reputation.reputation + 1
+        `,
         [
-          guildId,
-          userId,
-          target.id,
-          now
+          message.guild.id,
+          target.id
         ]
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Reputación",
-            `⭐ ${mention(message.author)} le dio reputación a ${mention(target.user)}.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `⭐ ${target} recibió **+1 reputación** de ${message.author}.`
+      );
     }
-    // =============================
-    // ADMINISTRACIÓN PRIVADA
-    // =============================
-    if (command === "admin") {
-      if (!isAdmin(message.member)) {
-        return errorMessage(
-          message.channel,
-          "No tienes permiso para ver este panel."
-        );
-      }
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Panel de administración",
-            "**🛡️ Moderación**\n" +
-            "`M!warn @usuario razón`\n" +
-            "`M!warnings @usuario`\n" +
-            "`M!timeout @usuario 10m razón`\n" +
-            "`M!untimeout @usuario`\n" +
-            "`M!kick @usuario razón`\n" +
-            "`M!ban @usuario razón`\n" +
-            "`M!clear 10`\n\n" +
-            "**⚙️ Configuración**\n" +
-            "`M!setwelcome #canal`\n\n" +
-            "**🎫 Tickets**\n" +
-            "`M!ticketpanel`\n\n" +
-            "Requiere permisos adecuados de Discord."
-          )
-        ]
-      });
-    }
+
+    // =========================
+    // SETWELCOME
+    // =========================
+
     if (command === "setwelcome") {
-      if (!isAdmin(message.member)) {
-        return errorMessage(
-          message.channel,
-          "Necesitas permiso de Administrador o Gestionar servidor."
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.ManageGuild
+        )
+      ) {
+        return message.reply(
+          "❌ Necesitas el permiso **Gestionar servidor**."
         );
       }
+
       const channel =
         message.mentions.channels.first();
-      if (
-        !channel ||
-        !channel.isTextBased()
-      ) {
-        return errorMessage(
-          message.channel,
-          "Uso: `M!setwelcome #canal`."
+
+      if (!channel) {
+        return message.reply(
+          "❌ Menciona el canal de bienvenida."
         );
       }
+
       await pool.query(
-        `INSERT INTO akari_settings
-         (guild_id, welcome_channel)
-         VALUES ($1, $2)
-         ON CONFLICT (guild_id)
-         DO UPDATE SET
-         welcome_channel = $2`,
+        `
+        INSERT INTO settings
+          (guild_id, welcome_channel)
+        VALUES ($1, $2)
+        ON CONFLICT (guild_id)
+        DO UPDATE SET welcome_channel = $2
+        `,
         [
-          guildId,
+          message.guild.id,
           channel.id
         ]
       );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Bienvenidas configuradas",
-            `🌸 Las bienvenidas se enviarán en ${channel}.`
-          )
-        ]
-      });
+
+      return message.reply(
+        `🌸 Canal de bienvenida establecido en ${channel}.`
+      );
     }
-    // =============================
-    // MODERACIÓN
-    // =============================
-    if (
-      [
-        "warn",
-        "warnings",
-        "timeout",
-        "untimeout",
-        "kick",
-        "ban",
-        "clear"
-      ].includes(command)
-    ) {
-      if (!isModerator(message.member)) {
-        return errorMessage(
-          message.channel,
-          "No tienes permiso para usar este comando."
-        );
+
+    // =========================
+    // WARN
+    // =========================
+
+    if (command === "warn") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.ModerateMembers
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
       }
-      if (command === "clear") {
-        const count = Number(args[0]);
-        if (
-          !Number.isInteger(count) ||
-          count < 1 ||
-          count > 100
-        ) {
-          return errorMessage(
-            message.channel,
-            "Uso: `M!clear 10` (máximo 100)."
-          );
-        }
-        if (
-          !message.guild.members.me.permissions.has(
-            PermissionFlagsBits.ManageMessages
-          )
-        ) {
-          return errorMessage(
-            message.channel,
-            "Necesito el permiso Gestionar mensajes."
-          );
-        }
-        const deleted =
-          await message.channel.bulkDelete(
-            count,
-            true
-          );
-        const reply =
-          await message.channel.send(
-            `🧹 Se eliminaron ${deleted.size} mensajes recientes.`
-          );
-        setTimeout(
-          () => reply.delete().catch(() => {}),
-          5000
-        );
-        return;
-      }
+
+      const target =
+        message.mentions.members.first();
+
       if (!target) {
-        return errorMessage(
-          message.channel,
-          `Menciona al usuario. Ejemplo: \`M!${command} @usuario razón\`.`
+        return message.reply(
+          "❌ Menciona al usuario."
         );
       }
-      if (
-        target.id === userId ||
-        target.id === client.user.id
-      ) {
-        return errorMessage(
-          message.channel,
-          "No puedes aplicar esa acción a esa cuenta."
-        );
-      }
-      if (
-        target.roles.highest.position >=
-          message.member.roles.highest.position &&
-        message.guild.ownerId !== userId
-      ) {
-        return errorMessage(
-          message.channel,
-          "Tu rol debe estar por encima del rol del usuario."
-        );
-      }
+
       const reason =
         args.slice(1).join(" ") ||
-        "Sin motivo especificado";
-      if (command === "warn") {
-        await pool.query(
-          `INSERT INTO akari_warnings
-           (guild_id, user_id, moderator_id, reason)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            guildId,
-            target.id,
-            userId,
-            reason
-          ]
-        );
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Aviso registrado",
-              `⚠️ ${mention(target.user)} recibió un aviso.\nMotivo: ${reason}`
-            )
-          ]
-        });
-      }
-      if (command === "warnings") {
-        const result = await pool.query(
-          `SELECT reason, moderator_id, created_at
-           FROM akari_warnings
-           WHERE guild_id = $1
-           AND user_id = $2
-           ORDER BY created_at DESC
-           LIMIT 10`,
-          [
-            guildId,
-            target.id
-          ]
-        );
-        const lines =
-          result.rows.map(
-            (row, i) =>
-              `**${i + 1}.** ${row.reason} — <@${row.moderator_id}>`
-          );
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Avisos",
-              lines.join("\n") ||
-              "Este usuario no tiene avisos registrados."
-            )
-          ]
-        });
-      }
-      if (command === "timeout") {
-        const duration =
-          parseDuration(args[1]);
-        if (!duration) {
-          return errorMessage(
-            message.channel,
-            "Uso: `M!timeout @usuario 10m razón`. Máximo 28 días."
-          );
-        }
-        if (!target.moderatable) {
-          return errorMessage(
-            message.channel,
-            "No puedo silenciar a ese usuario. Revisa mis permisos y la jerarquía de roles."
-          );
-        }
-        await target.timeout(
-          duration,
+        "Sin razón especificada";
+
+      await pool.query(
+        `
+        INSERT INTO warnings
+          (guild_id, user_id, moderator_id, reason)
+        VALUES ($1, $2, $3, $4)
+        `,
+        [
+          message.guild.id,
+          target.id,
+          message.author.id,
           reason
-        );
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Timeout aplicado",
-              `${mention(target.user)} recibió un timeout.\nMotivo: ${reason}`
-            )
-          ]
-        });
-      }
-      if (command === "untimeout") {
-        if (!target.moderatable) {
-          return errorMessage(
-            message.channel,
-            "No puedo quitarle el timeout a ese usuario."
-          );
-        }
-        await target.timeout(
-          null,
-          "Timeout retirado por moderación"
-        );
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Timeout retirado",
-              `Se retiró el timeout de ${mention(target.user)}.`
-            )
-          ]
-        });
-      }
-      if (command === "kick") {
-        if (!target.kickable) {
-          return errorMessage(
-            message.channel,
-            "No puedo expulsar a ese usuario. Revisa los permisos y los roles."
-          );
-        }
-        await target.kick(reason);
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Usuario expulsado",
-              `${target.user.tag} fue expulsado.\nMotivo: ${reason}`
-            )
-          ]
-        });
-      }
-      if (command === "ban") {
-        if (!target.bannable) {
-          return errorMessage(
-            message.channel,
-            "No puedo banear a ese usuario. Revisa los permisos y los roles."
-          );
-        }
-        await target.ban({ reason });
-        return message.channel.send({
-          embeds: [
-            embed(
-              "Usuario baneado",
-              `${target.user.tag} fue baneado.\nMotivo: ${reason}`
-            )
-          ]
-        });
-      }
-    }
-    // =============================
-    // TICKETS
-    // =============================
-    if (command === "ticketpanel") {
-      if (!isAdmin(message.member)) {
-        return errorMessage(
-          message.channel,
-          "Necesitas permiso de Administrador o Gestionar servidor."
-        );
-      }
-      const menu =
-        new StringSelectMenuBuilder()
-          .setCustomId(
-            "akari_ticket_category"
-          )
-          .setPlaceholder(
-            "🌸 Selecciona el tipo de ticket"
-          )
-          .addOptions(
-            {
-              label: "Soporte",
-              value: "Soporte",
-              emoji: "🛠️"
-            },
-            {
-              label: "Reporte",
-              value: "Reporte",
-              emoji: "🚨"
-            },
-            {
-              label: "Duda",
-              value: "Duda",
-              emoji: "❔"
-            },
-            {
-              label: "Allys/Affys/Socio",
-              value: "Allys/Affys/Socio",
-              emoji: "🤝"
-            },
-            {
-              label: "Postulación",
-              value: "Postulacion",
-              emoji: "📝"
-            },
-            {
-              label: "Otro",
-              value: "Otro",
-              emoji: "🌸"
-            }
-          );
-      return message.channel.send({
-        embeds: [
-          embed(
-            "Centro de tickets",
-            "💗 ¿En qué podemos ayudarte?\n\nSelecciona una categoría en el menú. Se creará un canal privado para ti."
-          )
-        ],
-        components: [
-          new ActionRowBuilder()
-            .addComponents(menu)
         ]
-      });
+      );
+
+      return message.reply(
+        `⚠️ ${target} recibió una advertencia.\n` +
+        `Razón: **${reason}**`
+      );
     }
-    // Comando desconocido:
-    // no llenar el chat de respuestas.
+
+    // =========================
+    // WARNINGS
+    // =========================
+
+    if (
+      command === "warnings" ||
+      command === "warns"
+    ) {
+      const target =
+        message.mentions.users.first() ||
+        message.author;
+
+      const result = await pool.query(
+        `
+        SELECT reason, created_at
+        FROM warnings
+        WHERE guild_id = $1 AND user_id = $2
+        ORDER BY created_at DESC
+        `,
+        [
+          message.guild.id,
+          target.id
+        ]
+      );
+
+      if (!result.rows.length) {
+        return message.reply(
+          `✅ ${target} no tiene advertencias.`
+        );
+      }
+
+      const text = result.rows
+        .slice(0, 10)
+        .map(
+          (w, i) =>
+            `**${i + 1}.** ${w.reason}`
+        )
+        .join("\n");
+
+      return message.reply(
+        `⚠️ Advertencias de ${target}:\n\n${text}`
+      );
+    }
+
+    // =========================
+    // TIMEOUT
+    // =========================
+
+    if (command === "timeout") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.ModerateMembers
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
+      }
+
+      const target =
+        message.mentions.members.first();
+
+      const minutes =
+        Number(args[1]) || 10;
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona al usuario."
+        );
+      }
+
+      if (!target.moderatable) {
+        return message.reply(
+          "❌ No puedo aplicar timeout a ese usuario."
+        );
+      }
+
+      await target.timeout(
+        minutes * 60 * 1000,
+        "Moderación de Akari Bot"
+      );
+
+      return message.reply(
+        `🔇 ${target} ha recibido timeout durante **${minutes} minutos**.`
+      );
+    }
+
+    // =========================
+    // UNTIMEOUT
+    // =========================
+
+    if (command === "untimeout") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.ModerateMembers
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
+      }
+
+      const target =
+        message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona al usuario."
+        );
+      }
+
+      await target.timeout(null);
+
+      return message.reply(
+        `🔊 Se quitó el timeout a ${target}.`
+      );
+    }
+
+    // =========================
+    // KICK
+    // =========================
+
+    if (command === "kick") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.KickMembers
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
+      }
+
+      const target =
+        message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona al usuario."
+        );
+      }
+
+      if (!target.kickable) {
+        return message.reply(
+          "❌ No puedo expulsar a ese usuario."
+        );
+      }
+
+      await target.kick(
+        "Expulsado mediante Akari Bot"
+      );
+
+      return message.reply(
+        `👢 ${target.user.tag} fue expulsado.`
+      );
+    }
+
+    // =========================
+    // BAN
+    // =========================
+
+    if (command === "ban") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.BanMembers
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
+      }
+
+      const target =
+        message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          "❌ Menciona al usuario."
+        );
+      }
+
+      if (!target.bannable) {
+        return message.reply(
+          "❌ No puedo banear a ese usuario."
+        );
+      }
+
+      await target.ban({
+        reason: "Baneado mediante Akari Bot"
+      });
+
+      return message.reply(
+        `🔨 ${target.user.tag} fue baneado.`
+      );
+    }
+
+    // =========================
+    // CLEAR
+    // =========================
+
+    if (command === "clear") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.ManageMessages
+        )
+      ) {
+        return message.reply("❌ No tienes permisos.");
+      }
+
+      const amount = Number(args[0]);
+
+      if (
+        !amount ||
+        amount < 1 ||
+        amount > 100
+      ) {
+        return message.reply(
+          "❌ Usa una cantidad entre 1 y 100."
+        );
+      }
+
+      await message.channel.bulkDelete(
+        amount,
+        true
+      );
+
+      const msg = await message.channel.send(
+        `🧹 Se eliminaron **${amount} mensajes**.`
+      );
+
+      setTimeout(() => {
+        msg.delete().catch(() => {});
+      }, 3000);
+
+      return;
+    }
+
   } catch (error) {
-    console.error(
-      `Error en comando ${command}:`,
-      error
-    );
-    return errorMessage(
-      message.channel,
-      "Ocurrió un error. Revisa los permisos y los registros de Render."
-    );
+    console.error("❌ Error ejecutando comando:", error);
+
+    return message.reply(
+      "❌ Ocurrió un error al ejecutar el comando."
+    ).catch(() => {});
   }
 });
-// =============================
-// INTERACCIONES DE TICKETS
-// =============================
-client.on("interactionCreate", async interaction => {
+
+// =========================
+// INTERACCIONES
+// =========================
+
+client.on("interactionCreate", async (interaction) => {
   try {
-    if (!interaction.inGuild()) return;
+    // =========================
+    // MENÚ DE TICKETS
+    // =========================
+
     if (
       interaction.isStringSelectMenu() &&
-      interaction.customId ===
-        "akari_ticket_category"
+      interaction.customId === "ticket_menu"
     ) {
-      await interaction.deferReply({
-        ephemeral: true
-      });
-      const guild = interaction.guild;
-      const user = interaction.user;
       const category =
         interaction.values[0];
-      const existing =
-        await pool.query(
-          `SELECT channel_id
-           FROM akari_tickets
-           WHERE guild_id = $1
-           AND owner_id = $2
-           AND status = 'open'`,
-          [
-            guild.id,
-            user.id
-          ]
-        );
-      if (existing.rows.length) {
-        const oldChannel =
-          await guild.channels
-            .fetch(
-              existing.rows[0].channel_id
-            )
-            .catch(() => null);
-        if (oldChannel) {
-          return interaction.editReply(
-            `Ya tienes un ticket abierto: ${oldChannel}`
+
+      const names = {
+        soporte: "Soporte",
+        reporte: "Reporte",
+        duda: "Duda",
+        alianza: "Allys-Affys-Socio",
+        postulacion: "Postulación",
+        otro: "Otro"
+      };
+
+      const categoryName =
+        names[category] || "Otro";
+
+      const existing = await pool.query(
+        `
+        SELECT channel_id
+        FROM tickets
+        WHERE guild_id = $1
+        AND user_id = $2
+        `,
+        [
+          interaction.guild.id,
+          interaction.user.id
+        ]
+      );
+
+      for (const row of existing.rows) {
+        const channel =
+          interaction.guild.channels.cache.get(
+            row.channel_id
           );
+
+        if (channel) {
+          return interaction.reply({
+            content:
+              `❌ Ya tienes un ticket abierto: ${channel}`,
+            ephemeral: true
+          });
         }
-        await pool.query(
-          `UPDATE akari_tickets
-           SET status = 'closed'
-           WHERE channel_id = $1`,
-          [
-            existing.rows[0].channel_id
-          ]
-        );
       }
-      const safeName =
-        user.username
-          .toLowerCase()
-          .replace(
-            /[^a-z0-9-]/g,
-            ""
-          )
-          .slice(0, 15) ||
-        "usuario";
+
       const channel =
-        await guild.channels.create({
-          name: `ticket-${safeName}`,
+        await interaction.guild.channels.create({
+          name:
+            `ticket-${interaction.user.username}`
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "-")
+              .slice(0, 20),
+
           type: ChannelType.GuildText,
-          topic:
-            `Ticket de ${user.tag} | Categoría: ${category}`,
+
           permissionOverwrites: [
             {
-              id: guild.roles.everyone.id,
+              id: interaction.guild.roles.everyone.id,
               deny: [
                 PermissionFlagsBits.ViewChannel
               ]
             },
             {
-              id: user.id,
+              id: interaction.user.id,
               allow: [
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.AttachFiles
-              ]
-            },
-            {
-              id: client.user.id,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.ManageChannels
+                PermissionFlagsBits.ReadMessageHistory
               ]
             }
           ]
         });
+
       await pool.query(
-        `INSERT INTO akari_tickets
-         (channel_id, guild_id, owner_id, status)
-         VALUES ($1, $2, $3, 'open')`,
+        `
+        INSERT INTO tickets
+          (guild_id, user_id, channel_id, category)
+        VALUES ($1, $2, $3, $4)
+        `,
         [
+          interaction.guild.id,
+          interaction.user.id,
           channel.id,
-          guild.id,
-          user.id
+          categoryName
         ]
       );
+
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle(`🌸 Ticket — ${categoryName}`)
+        .setDescription(
+          `Hola ${interaction.user} 🌸\n\n` +
+          `Tu ticket ha sido creado correctamente.\n` +
+          `Un miembro del equipo te atenderá pronto.\n\n` +
+          `**Categoría:** ${categoryName}`
+        );
+
       const closeButton =
         new ButtonBuilder()
-          .setCustomId(
-            "akari_ticket_close"
-          )
-          .setLabel(
-            "Cerrar ticket"
-          )
+          .setCustomId("close_ticket")
+          .setLabel("Cerrar ticket")
           .setEmoji("🔒")
-          .setStyle(
-            ButtonStyle.Danger
-          );
+          .setStyle(ButtonStyle.Danger);
+
+      const row =
+        new ActionRowBuilder()
+          .addComponents(closeButton);
+
       await channel.send({
-        content: `${user}`,
-        embeds: [
-          embed(
-            `Ticket: ${category}`,
-            `¡Hola ${mention(user)}! 🌸\nExplica tu consulta con detalle y el equipo podrá ayudarte.\n\nCuando termines, pulsa el botón para cerrar el ticket.`
-          )
-        ],
-        components: [
-          new ActionRowBuilder()
-            .addComponents(
-              closeButton
-            )
-        ]
+        content: `${interaction.user}`,
+        embeds: [embed],
+        components: [row]
       });
-      return interaction.editReply(
-        `🌸 Tu ticket está listo: ${channel}`
-      );
+
+      return interaction.reply({
+        content:
+          `🌸 Ticket creado correctamente: ${channel}`,
+        ephemeral: true
+      });
     }
+
+    // =========================
+    // CERRAR TICKET
+    // =========================
+
     if (
       interaction.isButton() &&
-      interaction.customId ===
-        "akari_ticket_close"
+      interaction.customId === "close_ticket"
     ) {
-      const result =
-        await pool.query(
-          `SELECT owner_id, status
-           FROM akari_tickets
-           WHERE channel_id = $1`,
-          [
-            interaction.channelId
-          ]
-        );
-      const ticket =
-        result.rows[0];
-      if (
-        !ticket ||
-        ticket.status !== "open"
-      ) {
+      const result = await pool.query(
+        `
+        SELECT *
+        FROM tickets
+        WHERE channel_id = $1
+        `,
+        [interaction.channel.id]
+      );
+
+      if (!result.rows.length) {
         return interaction.reply({
-          content:
-            "Este ticket ya está cerrado o no está registrado.",
+          content: "❌ Este canal no es un ticket.",
           ephemeral: true
         });
       }
-      const allowed =
-        ticket.owner_id ===
-          interaction.user.id ||
-        isAdmin(interaction.member);
-      if (!allowed) {
-        return interaction.reply({
-          content:
-            "Solo quien abrió el ticket o un administrador puede cerrarlo.",
-          ephemeral: true
-        });
-      }
+
       await interaction.reply(
-        "🔒 Ticket cerrado. El canal se eliminará en unos segundos."
+        "🔒 Cerrando ticket..."
       );
+
       await pool.query(
-        `UPDATE akari_tickets
-         SET status = 'closed'
-         WHERE channel_id = $1`,
-        [
-          interaction.channelId
-        ]
+        `
+        DELETE FROM tickets
+        WHERE channel_id = $1
+        `,
+        [interaction.channel.id]
       );
+
       setTimeout(() => {
-        interaction.channel
-          ?.delete("Ticket cerrado")
-          .catch(console.error);
-      }, 5000);
+        interaction.channel.delete().catch(() => {});
+      }, 1500);
     }
+
   } catch (error) {
     console.error(
-      "Error en interacción:",
+      "❌ Error en interacción:",
       error
     );
-    if (
-      interaction.isRepliable() &&
-      !interaction.replied &&
-      !interaction.deferred
-    ) {
+
+    if (!interaction.replied) {
       await interaction.reply({
-        content:
-          "Hubo un error al procesar la interacción. Revisa los permisos del bot.",
+        content: "❌ Ocurrió un error.",
         ephemeral: true
       }).catch(() => {});
     }
   }
 });
-// =============================
-// ERRORES Y CONEXIÓN
-// =============================
-process.on(
-  "unhandledRejection",
-  error => {
-    console.error(
-      "Promesa no controlada:",
-      error
-    );
-  }
-);
+
+// =========================
+// PANEL DE TICKETS
+// =========================
+
+async function sendTicketPanel(channel) {
+  const embed = new EmbedBuilder()
+    .setColor(PINK)
+    .setTitle("🌸 Centro de Tickets")
+    .setDescription(
+      "Selecciona abajo el motivo de tu ticket.\n\n" +
+      "🛠️ Soporte\n" +
+      "🚨 Reporte\n" +
+      "❓ Duda\n" +
+      "🤝 Allys-Affys-Socio\n" +
+      "📝 Postulación\n" +
+      "📌 Otro"
+    )
+    .setFooter({
+      text: "Akari Community 🌸"
+    });
+
+  const menu =
+    new StringSelectMenuBuilder()
+      .setCustomId("ticket_menu")
+      .setPlaceholder("Selecciona una categoría")
+      .addOptions(
+        {
+          label: "Soporte",
+          value: "soporte",
+          emoji: "🛠️"
+        },
+        {
+          label: "Reporte",
+          value: "reporte",
+          emoji: "🚨"
+        },
+        {
+          label: "Duda",
+          value: "duda",
+          emoji: "❓"
+        },
+        {
+          label: "Allys-Affys-Socio",
+          value: "alianza",
+          emoji: "🤝"
+        },
+        {
+          label: "Postulación",
+          value: "postulacion",
+          emoji: "📝"
+        },
+        {
+          label: "Otro",
+          value: "otro",
+          emoji: "📌"
+        }
+      );
+
+  const row =
+    new ActionRowBuilder()
+      .addComponents(menu);
+
+  await channel.send({
+    embeds: [embed],
+    components: [row]
+  });
+}
+
+// =========================
+// START
+// =========================
+
 async function start() {
   try {
+    console.log("🌸 AKARI: entrando en start()...");
     console.log("🌸 Conectando con PostgreSQL...");
+
     await pool.query("SELECT 1");
-    console.log("✅ PostgreSQL conectado correctamente.");
+
+    console.log(
+      "✅ PostgreSQL conectado correctamente."
+    );
+
     await initDatabase();
+
+    console.log(
+      "🌸 Conectando con Discord..."
+    );
+
     await client.login(
       process.env.DISCORD_TOKEN
     );
+
+    console.log(
+      "✅ Login de Discord realizado."
+    );
+
   } catch (error) {
     console.error(
-      "No se pudo iniciar Akari Bot:",
-      error
+      "❌ NO SE PUDO INICIAR AKARI BOT:"
     );
+
+    console.error(error);
+
     process.exit(1);
   }
 }
+
+console.log("🌸 AKARI: llamando a start()...");
+
 start();

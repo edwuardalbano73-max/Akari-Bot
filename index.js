@@ -15,36 +15,36 @@ const { Pool } = require("pg");
 const http = require("http");
 
 // ======================================================
-// AKARI BOT
+// CONFIGURACIÓN
 // ======================================================
-
-console.log("🌸 AKARI: index.js se está ejecutando...");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const DATABASE_URL = process.env.DATABASE_URL;
 const PORT = process.env.PORT || 10000;
 
+const PREFIX = "M!";
+const COLOR = 0xff9dcc;
+const STAFF_ROLE_ID = "1555318924365799546";
+
 if (!TOKEN) {
-  throw new Error("Falta la variable DISCORD_TOKEN.");
+  throw new Error("Falta DISCORD_TOKEN.");
 }
 
 if (!DATABASE_URL) {
-  throw new Error("Falta la variable DATABASE_URL de PostgreSQL.");
+  throw new Error("Falta DATABASE_URL de PostgreSQL.");
 }
 
-console.log("🌸 AKARI: variables de entorno encontradas.");
-
 // ======================================================
-// HTTP SERVER PARA RENDER
+// SERVIDOR HTTP PARA RENDER
 // ======================================================
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("🌸 Akari Bot está funcionando correctamente.");
+  res.end("Akari Bot está funcionando 🌸");
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Puerto HTTP abierto en ${PORT}`);
+  console.log(`🌐 Servidor HTTP activo en el puerto ${PORT}`);
 });
 
 // ======================================================
@@ -69,86 +69,111 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.User]
+  partials: [Partials.Channel]
 });
-
-const PREFIX = "M!";
-const COLOR = 0xff9dcc;
-
-const STAFF_ROLE_ID = "1555318924365799546";
 
 // ======================================================
 // VARIABLES
 // ======================================================
 
 const spamTracker = new Map();
-
 const blackjackGames = new Map();
+const cooldowns = new Map();
+
+// ======================================================
+// DATOS ANIME
+// ======================================================
 
 const animeCharacters = [
-  "Naruto Uzumaki",
-  "Sasuke Uchiha",
-  "Goku",
-  "Vegeta",
-  "Monkey D. Luffy",
-  "Roronoa Zoro",
-  "Tanjiro Kamado",
-  "Nezuko Kamado",
-  "Gojo Satoru",
-  "Megumi Fushiguro",
-  "Anya Forger",
-  "Levi Ackerman",
-  "Eren Yeager",
-  "Mikasa Ackerman",
-  "Saitama",
-  "Genos",
-  "Edward Elric",
-  "Killua Zoldyck",
-  "Gon Freecss",
-  "Light Yagami"
-];
-
-const animeFacts = [
-  "Naruto pertenece al clan Uzumaki.",
-  "Goku es el protagonista principal de Dragon Ball.",
-  "Luffy quiere convertirse en el Rey de los Piratas.",
-  "Tanjiro es el protagonista de Kimetsu no Yaiba.",
-  "Gojo es uno de los personajes más poderosos de Jujutsu Kaisen.",
-  "Anya Forger puede leer la mente en Spy x Family.",
-  "Saitama es conocido por derrotar enemigos con un solo golpe.",
-  "Edward Elric es el protagonista de Fullmetal Alchemist.",
-  "Levi Ackerman pertenece al Cuerpo de Exploración.",
-  "Killua Zoldyck proviene de una familia de asesinos."
+  {
+    name: "Naruto Uzumaki",
+    anime: "Naruto",
+    fact: "Es el protagonista de Naruto y pertenece al clan Uzumaki."
+  },
+  {
+    name: "Monkey D. Luffy",
+    anime: "One Piece",
+    fact: "Es el capitán de los Sombrero de Paja."
+  },
+  {
+    name: "Son Goku",
+    anime: "Dragon Ball",
+    fact: "Es uno de los personajes principales de Dragon Ball."
+  },
+  {
+    name: "Tanjiro Kamado",
+    anime: "Demon Slayer",
+    fact: "Es el protagonista de Demon Slayer."
+  },
+  {
+    name: "Satoru Gojo",
+    anime: "Jujutsu Kaisen",
+    fact: "Es uno de los hechiceros más importantes de Jujutsu Kaisen."
+  },
+  {
+    name: "Izuku Midoriya",
+    anime: "My Hero Academia",
+    fact: "Es conocido como Deku."
+  },
+  {
+    name: "Eren Yeager",
+    anime: "Attack on Titan",
+    fact: "Es uno de los personajes principales de Attack on Titan."
+  },
+  {
+    name: "Anya Forger",
+    anime: "Spy x Family",
+    fact: "Anya tiene la capacidad de leer pensamientos."
+  },
+  {
+    name: "Nezuko Kamado",
+    anime: "Demon Slayer",
+    fact: "Es la hermana menor de Tanjiro."
+  },
+  {
+    name: "Kakashi Hatake",
+    anime: "Naruto",
+    fact: "Fue el líder del Equipo 7."
+  }
 ];
 
 const animeQuotes = [
-  "¡Nunca abandonaré mi camino!",
-  "¡Seguiré avanzando aunque sea difícil!",
-  "¡Mis amigos son importantes para mí!",
-  "¡No voy a rendirme ahora!",
-  "¡Un verdadero guerrero sigue adelante!"
+  "Nunca abandones tus objetivos.",
+  "La verdadera fuerza también nace de proteger a los demás.",
+  "Cada aventura comienza con una decisión.",
+  "Incluso los días difíciles pueden convertirse en buenos recuerdos.",
+  "Seguir adelante también es una forma de valentía."
 ];
 
-const animeQuiz = [
+const animeFacts = [
+  "One Piece comenzó su publicación en 1997.",
+  "Naruto está dividido en Naruto y Naruto Shippuden.",
+  "Dragon Ball fue creado por Akira Toriyama.",
+  "Demon Slayer está basado en el manga de Koyoharu Gotouge.",
+  "My Hero Academia está ambientado en un mundo donde muchas personas poseen habilidades especiales.",
+  "Spy x Family combina comedia, acción y vida familiar."
+];
+
+const animeQuizQuestions = [
   {
-    question: "¿Quién quiere convertirse en Rey de los Piratas?",
-    options: ["Goku", "Luffy", "Naruto", "Gojo"],
-    answer: "Luffy"
+    question: "¿Cómo se llama el protagonista de One Piece?",
+    answers: ["luffy", "monkey d luffy", "monkey d. luffy"],
+    correct: "Monkey D. Luffy"
   },
   {
-    question: "¿Quién puede leer la mente en Spy x Family?",
-    options: ["Anya", "Mikasa", "Nezuko", "Sakura"],
-    answer: "Anya"
+    question: "¿Cómo se llama el protagonista de Naruto?",
+    answers: ["naruto", "naruto uzumaki"],
+    correct: "Naruto Uzumaki"
   },
   {
-    question: "¿Cuál es el nombre del protagonista de Dragon Ball?",
-    options: ["Goku", "Luffy", "Levi", "Eren"],
-    answer: "Goku"
+    question: "¿Cómo se llama la hermana de Tanjiro?",
+    answers: ["nezuko", "nezuko kamado"],
+    correct: "Nezuko Kamado"
   },
   {
-    question: "¿Quién es el protagonista de Kimetsu no Yaiba?",
-    options: ["Tanjiro", "Gojo", "Zoro", "Killua"],
-    answer: "Tanjiro"
+    question: "¿Cómo se llama el protagonista de Dragon Ball?",
+    answers: ["goku", "son goku"],
+    correct: "Son Goku"
   }
 ];
 
@@ -164,6 +189,14 @@ function embed(title, description) {
     .setTimestamp();
 }
 
+function random(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
+function formatCoins(amount) {
+  return `${Number(amount).toLocaleString("es-ES")} 💰`;
+}
+
 function isAdmin(member) {
   return member.permissions.has(PermissionsBitField.Flags.Administrator);
 }
@@ -175,27 +208,59 @@ function isStaff(member) {
   );
 }
 
-function random(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+function parseAmount(value) {
+  if (!value) return null;
 
-function formatCoins(number) {
-  return Number(number || 0).toLocaleString("es-ES");
-}
+  const cleaned = String(value)
+    .replace(/,/g, "")
+    .replace(/\./g, "");
 
-function getMention(message) {
-  return message.mentions.users.first();
+  const amount = Number(cleaned);
+
+  if (!Number.isFinite(amount)) return null;
+  if (amount <= 0) return null;
+  if (!Number.isInteger(amount)) return null;
+
+  return amount;
 }
 
 async function ensureUser(guildId, userId) {
   await pool.query(
     `
-    INSERT INTO users (guild_id, user_id, coins, bank, daily, work)
-    VALUES ($1, $2, 500, 0, 0, 0)
-    ON CONFLICT (guild_id, user_id)
-    DO NOTHING
+    INSERT INTO users
+    (guild_id, user_id, coins, bank, daily, work, bonus)
+    VALUES ($1, $2, 0, 0, 0, 0, 0)
+    ON CONFLICT (guild_id, user_id) DO NOTHING
     `,
     [guildId, userId]
+  );
+}
+
+async function getUser(guildId, userId) {
+  await ensureUser(guildId, userId);
+
+  const result = await pool.query(
+    `
+    SELECT *
+    FROM users
+    WHERE guild_id = $1 AND user_id = $2
+    `,
+    [guildId, userId]
+  );
+
+  return result.rows[0];
+}
+
+async function addCoins(guildId, userId, amount) {
+  await ensureUser(guildId, userId);
+
+  await pool.query(
+    `
+    UPDATE users
+    SET coins = coins + $1
+    WHERE guild_id = $2 AND user_id = $3
+    `,
+    [amount, guildId, userId]
   );
 }
 
@@ -221,8 +286,29 @@ async function addWarning(guildId, userId, moderatorId, reason) {
   return result.rows[0].total;
 }
 
+function cooldown(userId, command, ms) {
+  const key = `${userId}:${command}`;
+  const now = Date.now();
+
+  if (cooldowns.has(key)) {
+    const remaining = cooldowns.get(key) - now;
+
+    if (remaining > 0) {
+      return Math.ceil(remaining / 1000);
+    }
+  }
+
+  cooldowns.set(key, now + ms);
+
+  setTimeout(() => {
+    cooldowns.delete(key);
+  }, ms + 1000);
+
+  return 0;
+}
+
 // ======================================================
-// BASE DE DATOS
+// CREAR TABLAS
 // ======================================================
 
 async function createTables() {
@@ -232,17 +318,23 @@ async function createTables() {
     CREATE TABLE IF NOT EXISTS users (
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
-      coins BIGINT DEFAULT 500,
+      coins BIGINT DEFAULT 0,
       bank BIGINT DEFAULT 0,
       daily BIGINT DEFAULT 0,
       work BIGINT DEFAULT 0,
+      bonus BIGINT DEFAULT 0,
       PRIMARY KEY (guild_id, user_id)
-    )
+    );
   `);
 
   await pool.query(`
     ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS bank BIGINT DEFAULT 0
+    ADD COLUMN IF NOT EXISTS bank BIGINT DEFAULT 0;
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS bonus BIGINT DEFAULT 0;
   `);
 
   await pool.query(`
@@ -250,7 +342,7 @@ async function createTables() {
       guild_id TEXT PRIMARY KEY,
       welcome_channel TEXT,
       welcome_message TEXT
-    )
+    );
   `);
 
   await pool.query(`
@@ -262,12 +354,12 @@ async function createTables() {
       category TEXT NOT NULL,
       claimed_by TEXT,
       created_at TIMESTAMP DEFAULT NOW()
-    )
+    );
   `);
 
   await pool.query(`
     ALTER TABLE tickets
-    ADD COLUMN IF NOT EXISTS claimed_by TEXT
+    ADD COLUMN IF NOT EXISTS claimed_by TEXT;
   `);
 
   await pool.query(`
@@ -278,7 +370,7 @@ async function createTables() {
       moderator_id TEXT NOT NULL,
       reason TEXT,
       created_at TIMESTAMP DEFAULT NOW()
-    )
+    );
   `);
 
   await pool.query(`
@@ -287,7 +379,7 @@ async function createTables() {
       user_id TEXT NOT NULL,
       reputation INTEGER DEFAULT 0,
       PRIMARY KEY (guild_id, user_id)
-    )
+    );
   `);
 
   await pool.query(`
@@ -297,9 +389,9 @@ async function createTables() {
       type TEXT NOT NULL,
       target_id TEXT,
       message TEXT,
-      price BIGINT NOT NULL DEFAULT 0,
+      price BIGINT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
-    )
+    );
   `);
 
   console.log("✅ Tablas verificadas correctamente.");
@@ -309,7 +401,7 @@ async function createTables() {
 // READY
 // ======================================================
 
-client.once("clientReady", async () => {
+client.once("clientReady", () => {
   console.log("=================================");
   console.log("🌸 Akari Bot conectado.");
   console.log(`🤖 Usuario: ${client.user.tag}`);
@@ -320,7 +412,7 @@ client.once("clientReady", async () => {
     activities: [
       {
         name: "Akari Community 🌸",
-        type: 3
+        type: 0
       }
     ],
     status: "online"
@@ -335,24 +427,22 @@ client.on("guildMemberAdd", async member => {
   try {
     const result = await pool.query(
       `
-      SELECT welcome_channel, welcome_message
+      SELECT welcome_channel
       FROM settings
       WHERE guild_id = $1
       `,
       [member.guild.id]
     );
 
-    if (!result.rows.length) return;
+    if (!result.rows[0]?.welcome_channel) return;
 
-    const channelId = result.rows[0].welcome_channel;
-    if (!channelId) return;
+    const channel = member.guild.channels.cache.get(
+      result.rows[0].welcome_channel
+    );
 
-    const channel = member.guild.channels.cache.get(channelId);
     if (!channel) return;
 
-    const miembros = member.guild.memberCount;
-
-    const welcomeText = `
+    const text = `
 ╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
        🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
           👋・BIENVENIDO/A
@@ -375,93 +465,108 @@ Te recomendamos leer las reglas y conocer los diferentes canales del servidor pa
 
 💗 ¡Disfruta de tu estancia en Akari Community!
 
-👥・Ahora somos **${miembros}** miembros.
+👥・Ahora somos **${member.guild.memberCount}** miembros.
 `;
 
     await channel.send({
-      content: welcomeText
+      content: `${member}`,
+      embeds: [
+        embed("🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮", text)
+      ]
     });
   } catch (error) {
-    console.error("Error bienvenida:", error);
+    console.error("Error en bienvenida:", error);
   }
 });
 
 // ======================================================
-// ANTI-SPAM
-// 5 MENSAJES SEGUIDOS = WARN
+// ANTISPAM
+// 5 MENSAJES SEGUIDOS = 1 WARN
 // 3 WARNS = MUTE 1 HORA
 // ======================================================
 
-async function handleAntiSpam(message) {
-  if (!message.guild || message.author.bot) return;
+async function antiSpam(message) {
+  if (!message.guild) return false;
+  if (message.author.bot) return false;
 
-  const key = `${message.guild.id}:${message.author.id}`;
+  const member = message.member;
 
-  const now = Date.now();
-  const old = spamTracker.get(key);
+  if (!member) return false;
 
-  if (!old || now - old.lastMessage > 7000) {
-    spamTracker.set(key, {
-      count: 1,
-      lastMessage: now
-    });
-    return;
+  if (
+    member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+    member.roles.cache.has(STAFF_ROLE_ID)
+  ) {
+    return false;
   }
 
-  old.count++;
-  old.lastMessage = now;
+  const key = `${message.guild.id}:${message.author.id}`;
+  const now = Date.now();
 
-  if (old.count < 5) return;
+  let data = spamTracker.get(key);
+
+  if (!data || now - data.lastMessage > 7000) {
+    data = {
+      count: 0,
+      lastMessage: now
+    };
+  }
+
+  data.count++;
+  data.lastMessage = now;
+
+  spamTracker.set(key, data);
+
+  if (data.count < 5) return false;
 
   spamTracker.delete(key);
 
-  const totalWarnings = await addWarning(
-    message.guild.id,
-    message.author.id,
-    client.user.id,
-    "Anti-spam: 5 mensajes consecutivos."
-  );
-
   try {
-    await message.delete();
-  } catch {}
-
-  if (totalWarnings >= 3) {
-    const member = await message.guild.members
-      .fetch(message.author.id)
-      .catch(() => null);
-
-    if (member && member.moderatable) {
-      await member.timeout(
-        60 * 60 * 1000,
-        "Anti-spam: 3 warnings acumulados."
-      ).catch(() => {});
-    }
+    const totalWarnings = await addWarning(
+      message.guild.id,
+      message.author.id,
+      client.user.id,
+      "Anti-spam: 5 mensajes seguidos"
+    );
 
     await message.channel.send({
       embeds: [
         embed(
-          "🚨・ANTI-SPAM",
-          `${message.author} recibió su **3.er warning** por spam.\n\n🔇 Se aplicó un **mute de 1 hora**.`
+          "⚠️・Anti-Spam",
+          `${message.author}, has recibido **1 warn** por enviar 5 mensajes seguidos.\n\n📊 Warns actuales: **${totalWarnings}/3**`
         )
       ]
     }).then(msg => {
-      setTimeout(() => msg.delete().catch(() => {}), 8000);
+      setTimeout(() => msg.delete().catch(() => {}), 5000);
     });
 
-    return;
-  }
+    if (totalWarnings >= 3) {
+      try {
+        await member.timeout(
+          60 * 60 * 1000,
+          "Anti-spam: 3 warnings"
+        );
 
-  await message.channel.send({
-    embeds: [
-      embed(
-        "⚠️・ANTI-SPAM",
-        `${message.author} recibió un warning por enviar **5 mensajes consecutivos**.\n\n📊 Warnings: **${totalWarnings}/3**`
-      )
-    ]
-  }).then(msg => {
-    setTimeout(() => msg.delete().catch(() => {}), 8000);
-  });
+        await message.channel.send({
+          embeds: [
+            embed(
+              "🔇・Mute automático",
+              `${message.author} ha alcanzado **3 warns** y recibió un **mute de 1 hora** por acumulación de advertencias.`
+            )
+          ]
+        }).then(msg => {
+          setTimeout(() => msg.delete().catch(() => {}), 6000);
+        });
+      } catch (error) {
+        console.error("No se pudo aplicar el mute:", error);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error Anti-Spam:", error);
+    return false;
+  }
 }
 
 // ======================================================
@@ -470,18 +575,28 @@ async function handleAntiSpam(message) {
 
 client.on("messageCreate", async message => {
   try {
-    if (!message.guild || message.author.bot) return;
+    if (!message.guild) return;
+    if (message.author.bot) return;
 
-    await handleAntiSpam(message);
+    const spammed = await antiSpam(message);
+
+    if (spammed) return;
 
     if (!message.content.startsWith(PREFIX)) return;
 
-    const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+    const args = message.content
+      .slice(PREFIX.length)
+      .trim()
+      .split(/\s+/);
+
     const command = args.shift()?.toLowerCase();
 
     if (!command) return;
 
-    await ensureUser(message.guild.id, message.author.id);
+    await ensureUser(
+      message.guild.id,
+      message.author.id
+    );
 
     // ==================================================
     // PING
@@ -492,7 +607,7 @@ client.on("messageCreate", async message => {
         embeds: [
           embed(
             "🏓・PONG",
-            `💗 Latencia: **${client.ws.ping}ms**\n🌸 Akari está funcionando correctamente.`
+            `💗 Latencia: **${client.ws.ping}ms**`
           )
         ]
       });
@@ -502,21 +617,21 @@ client.on("messageCreate", async message => {
     // HELP
     // ==================================================
 
-    if (["help", "ayuda"].includes(command)) {
+    if (command === "help" || command === "ayuda") {
       const menu = new StringSelectMenuBuilder()
         .setCustomId("help_menu")
         .setPlaceholder("🌸 Selecciona una categoría")
-        .addOptions(
+        .addOptions([
           {
             label: "Economía",
-            description: "Dinero, banco y tienda",
-            value: "economia",
+            description: "Dinero, banco, tienda y economía",
+            value: "economy",
             emoji: "💰"
           },
           {
             label: "Diversión",
-            description: "Juegos y entretenimiento",
-            value: "diversion",
+            description: "Juegos y comandos divertidos",
+            value: "fun",
             emoji: "🎮"
           },
           {
@@ -527,29 +642,48 @@ client.on("messageCreate", async message => {
           },
           {
             label: "Información",
-            description: "Información del servidor",
-            value: "informacion",
+            description: "Información del servidor y usuarios",
+            value: "info",
             emoji: "📚"
           },
           {
             label: "Utilidades",
             description: "Herramientas útiles",
-            value: "utilidades",
+            value: "utils",
             emoji: "🛠️"
           },
           {
             label: "Anime",
-            description: "Comandos de anime",
+            description: "Comandos de anime y otaku",
             value: "anime",
             emoji: "🌸"
           }
-        );
+        ]);
 
       return message.reply({
         embeds: [
           embed(
-            "🌸・AKARI HELP",
-            `Bienvenido/a al centro de comandos de **Akari Community**. 💗\n\nSelecciona una categoría en el menú para ver los comandos disponibles.\n\n> 🌸 Prefix: \`${PREFIX}\`\n> 💗 Comandos fáciles de usar\n> ✨ Nuevos comandos próximamente`
+            "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙖𝙣𝙙𝙨",
+            `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+        🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+💗 Bienvenido/a al centro de comandos de Akari.
+
+Selecciona una categoría en el menú de abajo para ver los comandos disponibles.
+
+🌸・Prefijo: \`${PREFIX}\`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 Economía
+🎮 Diversión
+💗 Social
+📚 Información
+🛠️ Utilidades
+🌸 Anime
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`
           )
         ],
         components: [
@@ -563,230 +697,207 @@ client.on("messageCreate", async message => {
     // ==================================================
 
     if (["balance", "bal", "coins"].includes(command)) {
-      const user = getMention(message) || message.author;
-
-      await ensureUser(message.guild.id, user.id);
-
-      const result = await pool.query(
-        `
-        SELECT coins, bank
-        FROM users
-        WHERE guild_id = $1 AND user_id = $2
-        `,
-        [message.guild.id, user.id]
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
-
-      const data = result.rows[0];
 
       return message.reply({
         embeds: [
           embed(
-            "💰・BALANCE",
-            `👤 Usuario: ${user}\n\n💵 Efectivo: **${formatCoins(data.coins)}** monedas\n🏦 Banco: **${formatCoins(data.bank)}** monedas\n💎 Total: **${formatCoins(Number(data.coins) + Number(data.bank))}** monedas`
+            "💰・Tu economía",
+            `
+👤 Usuario: ${message.author}
+
+💵 Efectivo: **${formatCoins(user.coins)}**
+🏦 Banco: **${formatCoins(user.bank)}**
+
+💎 Total: **${formatCoins(
+              Number(user.coins) + Number(user.bank)
+            )}**
+`
+          )
+        ]
+      });
+    }
+
+    if (["bank", "banco", "economy", "stats"].includes(command)) {
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🏦・Estadísticas económicas",
+            `
+💵 Efectivo: **${formatCoins(user.coins)}**
+🏦 Banco: **${formatCoins(user.bank)}**
+💎 Patrimonio total: **${formatCoins(
+              Number(user.coins) + Number(user.bank)
+            )}**
+
+📅 Daily: ${user.daily
+              ? `<t:${Math.floor(Number(user.daily) / 1000)}:R>`
+              : "Disponible"}
+
+💼 Work: ${user.work
+              ? `<t:${Math.floor(Number(user.work) / 1000)}:R>`
+              : "Disponible"}
+`
           )
         ]
       });
     }
 
     if (command === "daily") {
-      const result = await pool.query(
-        `SELECT daily FROM users WHERE guild_id=$1 AND user_id=$2`,
-        [message.guild.id, message.author.id]
+      const remaining = cooldown(
+        message.author.id,
+        "daily",
+        24 * 60 * 60 * 1000
       );
 
-      const last = Number(result.rows[0].daily || 0);
-      const now = Date.now();
-
-      if (now - last < 24 * 60 * 60 * 1000) {
-        const remaining = 24 * 60 * 60 * 1000 - (now - last);
-        const hours = Math.ceil(remaining / 3600000);
-
+      if (remaining) {
         return message.reply({
           embeds: [
             embed(
-              "⏳・DAILY",
-              `Ya reclamaste tu recompensa diaria.\n\n⏰ Regresa en aproximadamente **${hours}h**.`
+              "⏰・Daily",
+              `Ya recogiste tu recompensa.\n\nVuelve <t:${Math.floor((Date.now() + remaining * 1000) / 1000)}:R>.`
             )
           ]
         });
       }
 
-      const amount = random(250, 500);
+      const amount = Math.floor(Math.random() * 201) + 300;
+
+      await addCoins(
+        message.guild.id,
+        message.author.id,
+        amount
+      );
 
       await pool.query(
         `
         UPDATE users
-        SET coins = coins + $1, daily = $2
-        WHERE guild_id=$3 AND user_id=$4
+        SET daily = $1
+        WHERE guild_id = $2 AND user_id = $3
         `,
-        [amount, now, message.guild.id, message.author.id]
+        [
+          Date.now(),
+          message.guild.id,
+          message.author.id
+        ]
       );
 
       return message.reply({
         embeds: [
           embed(
-            "🎁・RECOMPENSA DIARIA",
-            `¡Has recibido **${amount} monedas**! 💗\n\nVuelve mañana para reclamar otra recompensa.`
+            "🎁・Recompensa diaria",
+            `
+🌸 Has recibido **${formatCoins(amount)}**.
+
+💗 ¡Vuelve mañana para reclamar otra recompensa!
+`
           )
         ]
       });
     }
 
     if (command === "work") {
-      const result = await pool.query(
-        `SELECT work FROM users WHERE guild_id=$1 AND user_id=$2`,
-        [message.guild.id, message.author.id]
+      const remaining = cooldown(
+        message.author.id,
+        "work",
+        30 * 60 * 1000
       );
 
-      const last = Number(result.rows[0].work || 0);
-      const now = Date.now();
-
-      if (now - last < 30 * 1000) {
+      if (remaining) {
         return message.reply({
           embeds: [
             embed(
-              "⏳・TRABAJO",
-              "Estás cansado/a. Espera **30 segundos** antes de volver a trabajar."
+              "⏰・Trabajo",
+              `Ya trabajaste recientemente.\n\nVuelve <t:${Math.floor((Date.now() + remaining * 1000) / 1000)}:R>.`
             )
           ]
         });
       }
 
-      const jobs = [
-        "trabajaste en una cafetería ☕",
-        "ayudaste en una tienda 🛍️",
-        "hiciste un trabajo online 💻",
-        "ayudaste a un vecino 🏠",
-        "trabajaste en Akari Community 🌸"
-      ];
+      const amount = Math.floor(Math.random() * 201) + 100;
 
-      const job = jobs[random(0, jobs.length - 1)];
-      const amount = random(100, 300);
-
-      await pool.query(
-        `
-        UPDATE users
-        SET coins = coins + $1, work = $2
-        WHERE guild_id=$3 AND user_id=$4
-        `,
-        [amount, now, message.guild.id, message.author.id]
+      await addCoins(
+        message.guild.id,
+        message.author.id,
+        amount
       );
 
       return message.reply({
         embeds: [
           embed(
-            "💼・TRABAJO",
-            `🌸 ${job}\n\n💰 Ganaste **${amount} monedas**.`
+            "💼・Trabajo completado",
+            `✨ Has trabajado y recibido **${formatCoins(amount)}**.`
           )
         ]
       });
     }
 
     if (command === "beg") {
-      const amount = random(20, 100);
+      const remaining = cooldown(
+        message.author.id,
+        "beg",
+        60 * 1000
+      );
 
-      await pool.query(
-        `
-        UPDATE users
-        SET coins = coins + $1
-        WHERE guild_id=$2 AND user_id=$3
-        `,
-        [amount, message.guild.id, message.author.id]
+      if (remaining) {
+        return message.reply({
+          embeds: [
+            embed(
+              "⏰・Espera",
+              `Puedes volver a pedir monedas <t:${Math.floor((Date.now() + remaining * 1000) / 1000)}:R>.`
+            )
+          ]
+        });
+      }
+
+      const amount = Math.floor(Math.random() * 101) + 20;
+
+      await addCoins(
+        message.guild.id,
+        message.author.id,
+        amount
       );
 
       return message.reply({
         embeds: [
           embed(
-            "🥺・BEG",
-            `Alguien tuvo piedad de ti y te dio **${amount} monedas**. 💗`
-          )
-        ]
-      });
-    }
-
-    if (["pay", "give", "transfer"].includes(command)) {
-      const target = message.mentions.users.first();
-      const amount = Number(args[1] || args[0]);
-
-      if (!target || target.bot) {
-        return message.reply("❌ Debes mencionar a un usuario.");
-      }
-
-      if (!Number.isInteger(amount) || amount <= 0) {
-        return message.reply("❌ Indica una cantidad válida.");
-      }
-
-      if (target.id === message.author.id) {
-        return message.reply("❌ No puedes enviarte dinero a ti mismo.");
-      }
-
-      const result = await pool.query(
-        `
-        SELECT coins
-        FROM users
-        WHERE guild_id=$1 AND user_id=$2
-        `,
-        [message.guild.id, message.author.id]
-      );
-
-      if (Number(result.rows[0].coins) < amount) {
-        return message.reply("❌ No tienes suficientes monedas.");
-      }
-
-      await ensureUser(message.guild.id, target.id);
-
-      await pool.query(
-        `
-        UPDATE users
-        SET coins = coins - $1
-        WHERE guild_id=$2 AND user_id=$3
-        `,
-        [amount, message.guild.id, message.author.id]
-      );
-
-      await pool.query(
-        `
-        UPDATE users
-        SET coins = coins + $1
-        WHERE guild_id=$2 AND user_id=$3
-        `,
-        [amount, message.guild.id, target.id]
-      );
-
-      return message.reply({
-        embeds: [
-          embed(
-            "💸・TRANSFERENCIA",
-            `${message.author} envió **${formatCoins(amount)} monedas** a ${target}. 💗`
+            "🙏・Beg",
+            `Alguien decidió ayudarte y recibiste **${formatCoins(amount)}**.`
           )
         ]
       });
     }
 
     if (["deposit", "dep"].includes(command)) {
-      const result = await pool.query(
-        `SELECT coins FROM users WHERE guild_id=$1 AND user_id=$2`,
-        [message.guild.id, message.author.id]
-      );
+      const amount = parseAmount(args[0]);
 
-      const coins = Number(result.rows[0].coins);
-      const amount = args[0]?.toLowerCase() === "all"
-        ? coins
-        : Number(args[0]);
-
-      if (!Number.isInteger(amount) || amount <= 0) {
-        return message.reply("❌ Usa `M!deposit cantidad` o `M!deposit all`.");
+      if (!amount) {
+        return message.reply("❌ Usa: `M!deposit cantidad`");
       }
 
-      if (amount > coins) {
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
+      );
+
+      if (Number(user.coins) < amount) {
         return message.reply("❌ No tienes suficiente dinero en efectivo.");
       }
 
       await pool.query(
         `
         UPDATE users
-        SET coins = coins - $1, bank = bank + $1
-        WHERE guild_id=$2 AND user_id=$3
+        SET coins = coins - $1,
+            bank = bank + $1
+        WHERE guild_id = $2 AND user_id = $3
         `,
         [amount, message.guild.id, message.author.id]
       );
@@ -794,34 +905,31 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🏦・DEPÓSITO",
-            `Has depositado **${formatCoins(amount)} monedas** en tu banco. 💰`
+            "🏦・Depósito",
+            `Has depositado **${formatCoins(amount)}** en el banco.`
           )
         ]
       });
     }
 
     if (["depositall", "depall"].includes(command)) {
-      const result = await pool.query(
-        `
-        SELECT coins
-        FROM users
-        WHERE guild_id=$1 AND user_id=$2
-        `,
-        [message.guild.id, message.author.id]
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
 
-      const amount = Number(result.rows[0].coins);
+      const amount = Number(user.coins);
 
       if (amount <= 0) {
-        return message.reply("❌ No tienes monedas para depositar.");
+        return message.reply("❌ No tienes dinero en efectivo para depositar.");
       }
 
       await pool.query(
         `
         UPDATE users
-        SET coins = 0, bank = bank + $1
-        WHERE guild_id=$2 AND user_id=$3
+        SET coins = 0,
+            bank = bank + $1
+        WHERE guild_id = $2 AND user_id = $3
         `,
         [amount, message.guild.id, message.author.id]
       );
@@ -829,38 +937,35 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🏦・DEPÓSITO TOTAL",
-            `Has depositado todas tus monedas.\n\n💰 Cantidad: **${formatCoins(amount)}**`
+            "🏦・Depósito completo",
+            `Has depositado todo tu efectivo: **${formatCoins(amount)}**.`
           )
         ]
       });
     }
 
     if (["withdraw", "retirar"].includes(command)) {
-      const result = await pool.query(
-        `SELECT bank FROM users WHERE guild_id=$1 AND user_id=$2`,
-        [message.guild.id, message.author.id]
-      );
+      const amount = parseAmount(args[0]);
 
-      const bank = Number(result.rows[0].bank);
-
-      const amount = args[0]?.toLowerCase() === "all"
-        ? bank
-        : Number(args[0]);
-
-      if (!Number.isInteger(amount) || amount <= 0) {
-        return message.reply("❌ Usa `M!withdraw cantidad` o `M!withdraw all`.");
+      if (!amount) {
+        return message.reply("❌ Usa: `M!withdraw cantidad`");
       }
 
-      if (amount > bank) {
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
+      );
+
+      if (Number(user.bank) < amount) {
         return message.reply("❌ No tienes suficiente dinero en el banco.");
       }
 
       await pool.query(
         `
         UPDATE users
-        SET bank = bank - $1, coins = coins + $1
-        WHERE guild_id=$2 AND user_id=$3
+        SET bank = bank - $1,
+            coins = coins + $1
+        WHERE guild_id = $2 AND user_id = $3
         `,
         [amount, message.guild.id, message.author.id]
       );
@@ -868,20 +973,20 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "💵・RETIRO",
-            `Has retirado **${formatCoins(amount)} monedas** de tu banco.`
+            "💵・Retiro",
+            `Has retirado **${formatCoins(amount)}** del banco.`
           )
         ]
       });
     }
 
     if (["withdrawall", "retirarall"].includes(command)) {
-      const result = await pool.query(
-        `SELECT bank FROM users WHERE guild_id=$1 AND user_id=$2`,
-        [message.guild.id, message.author.id]
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
 
-      const amount = Number(result.rows[0].bank);
+      const amount = Number(user.bank);
 
       if (amount <= 0) {
         return message.reply("❌ No tienes dinero en el banco.");
@@ -890,8 +995,9 @@ client.on("messageCreate", async message => {
       await pool.query(
         `
         UPDATE users
-        SET bank = 0, coins = coins + $1
-        WHERE guild_id=$2 AND user_id=$3
+        SET bank = 0,
+            coins = coins + $1
+        WHERE guild_id = $2 AND user_id = $3
         `,
         [amount, message.guild.id, message.author.id]
       );
@@ -899,8 +1005,123 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "💵・RETIRO TOTAL",
-            `Has retirado todo tu dinero del banco.\n\n💰 Cantidad: **${formatCoins(amount)}**`
+            "💵・Retiro completo",
+            `Has retirado todo tu dinero del banco: **${formatCoins(amount)}**.`
+          )
+        ]
+      });
+    }
+
+    if (["pay", "give", "transfer"].includes(command)) {
+      const target = message.mentions.users.first();
+      const amount = parseAmount(args[1]);
+
+      if (!target || !amount) {
+        return message.reply(
+          "❌ Usa: `M!pay @usuario cantidad`"
+        );
+      }
+
+      if (target.bot) {
+        return message.reply("❌ No puedes enviar dinero a un bot.");
+      }
+
+      if (target.id === message.author.id) {
+        return message.reply("❌ No puedes enviarte dinero a ti mismo.");
+      }
+
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
+      );
+
+      if (Number(user.coins) < amount) {
+        return message.reply("❌ No tienes suficiente dinero.");
+      }
+
+      await ensureUser(message.guild.id, target.id);
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins - $1
+        WHERE guild_id = $2 AND user_id = $3
+        `,
+        [amount, message.guild.id, message.author.id]
+      );
+
+      await addCoins(
+        message.guild.id,
+        target.id,
+        amount
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "💸・Transferencia",
+            `${message.author} ha enviado **${formatCoins(amount)}** a ${target}.`
+          )
+        ]
+      });
+    }
+
+    if (["payall", "giveall"].includes(command)) {
+      const amount = parseAmount(args[0]);
+
+      if (!amount) {
+        return message.reply(
+          "❌ Usa: `M!payall cantidad`"
+        );
+      }
+
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
+      );
+
+      if (Number(user.coins) < amount) {
+        return message.reply("❌ No tienes suficiente dinero.");
+      }
+
+      const members = message.guild.members.cache.filter(
+        m => !m.user.bot && m.id !== message.author.id
+      );
+
+      if (members.size === 0) {
+        return message.reply("❌ No hay miembros disponibles.");
+      }
+
+      const total = amount * members.size;
+
+      if (Number(user.coins) < total) {
+        return message.reply(
+          `❌ Necesitas **${formatCoins(total)}** para pagar ${members.size} personas.`
+        );
+      }
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = coins - $1
+        WHERE guild_id = $2 AND user_id = $3
+        `,
+        [total, message.guild.id, message.author.id]
+      );
+
+      for (const member of members.values()) {
+        await addCoins(
+          message.guild.id,
+          member.id,
+          amount
+        );
+      }
+
+      return message.reply({
+        embeds: [
+          embed(
+            "💸・Pago global",
+            `Has enviado **${formatCoins(amount)}** a **${members.size} miembros**.\n\n💎 Total enviado: **${formatCoins(total)}**`
           )
         ]
       });
@@ -909,10 +1130,10 @@ client.on("messageCreate", async message => {
     if (["leaderboard", "top", "rich"].includes(command)) {
       const result = await pool.query(
         `
-        SELECT user_id, (coins + bank) AS total
+        SELECT user_id, coins + bank AS total
         FROM users
-        WHERE guild_id=$1
-        ORDER BY (coins + bank) DESC
+        WHERE guild_id = $1
+        ORDER BY total DESC
         LIMIT 10
         `,
         [message.guild.id]
@@ -921,14 +1142,19 @@ client.on("messageCreate", async message => {
       let text = "";
 
       result.rows.forEach((row, index) => {
-        text += `**${index + 1}.** <@${row.user_id}> — 💰 **${formatCoins(row.total)}**\n`;
+        text += `**${index + 1}.** <@${row.user_id}> — **${formatCoins(row.total)}**\n`;
       });
 
-      if (!text) text = "Todavía no hay datos.";
+      if (!text) {
+        text = "Todavía no hay datos.";
+      }
 
       return message.reply({
         embeds: [
-          embed("🏆・TOP DE RIQUEZA", text)
+          embed(
+            "🏆・Ranking económico",
+            text
+          )
         ]
       });
     }
@@ -937,12 +1163,12 @@ client.on("messageCreate", async message => {
     // SHOP
     // ==================================================
 
-    if (["shop", "tienda"].includes(command)) {
+    if (command === "shop" || command === "tienda") {
       const result = await pool.query(
         `
         SELECT *
         FROM shop_items
-        WHERE guild_id=$1
+        WHERE guild_id = $1
         ORDER BY id ASC
         `,
         [message.guild.id]
@@ -952,8 +1178,8 @@ client.on("messageCreate", async message => {
         return message.reply({
           embeds: [
             embed(
-              "🛒・TIENDA",
-              "La tienda está vacía actualmente. 🌸"
+              "🛒・Tienda",
+              "La tienda está vacía actualmente."
             )
           ]
         });
@@ -964,58 +1190,61 @@ client.on("messageCreate", async message => {
       for (const item of result.rows) {
         if (item.type === "role") {
           const role = message.guild.roles.cache.get(item.target_id);
-          text += `**#${item.id}** — 🎭 ${role ? role.name : "Rol eliminado"}\n`;
-        } else {
-          text += `**#${item.id}** — 💬 ${item.message}\n`;
-        }
 
-        text += `💰 Precio: **${formatCoins(item.price)}**\n\n`;
+          text += `**#${item.id}**・${role ? role : "Rol eliminado"} — **${formatCoins(item.price)}**\n`;
+        } else {
+          text += `**#${item.id}**・${item.message} — **${formatCoins(item.price)}**\n`;
+        }
       }
 
       return message.reply({
         embeds: [
           embed(
-            "🛒・AKARI SHOP",
-            `${text}\n💗 Compra usando \`${PREFIX}buy ID\`.`
+            "🛒・Tienda de Akari",
+            `
+Compra recompensas usando tus monedas.
+
+━━━━━━━━━━━━━━━━━━━━
+
+${text}
+
+━━━━━━━━━━━━━━━━━━━━
+
+💗 Usa \`${PREFIX}buy ID\` para comprar.
+`
           )
         ]
       });
     }
 
-    if (command === "buy") {
+    if (command === "buy" || command === "comprar") {
       const id = Number(args[0]);
 
       if (!id) {
-        return message.reply("❌ Usa `M!buy ID`.");
+        return message.reply("❌ Usa: `M!buy ID`");
       }
 
       const result = await pool.query(
         `
         SELECT *
         FROM shop_items
-        WHERE id=$1 AND guild_id=$2
+        WHERE id = $1 AND guild_id = $2
         `,
         [id, message.guild.id]
       );
 
-      if (!result.rows.length) {
-        return message.reply("❌ Ese artículo no existe.");
-      }
-
       const item = result.rows[0];
 
-      const userResult = await pool.query(
-        `
-        SELECT coins
-        FROM users
-        WHERE guild_id=$1 AND user_id=$2
-        `,
-        [message.guild.id, message.author.id]
+      if (!item) {
+        return message.reply("❌ Ese producto no existe.");
+      }
+
+      const user = await getUser(
+        message.guild.id,
+        message.author.id
       );
 
-      const coins = Number(userResult.rows[0].coins);
-
-      if (coins < Number(item.price)) {
+      if (Number(user.coins) < Number(item.price)) {
         return message.reply("❌ No tienes suficientes monedas.");
       }
 
@@ -1023,58 +1252,148 @@ client.on("messageCreate", async message => {
         const role = message.guild.roles.cache.get(item.target_id);
 
         if (!role) {
-          return message.reply("❌ El rol de este artículo ya no existe.");
+          return message.reply("❌ El rol ya no existe.");
         }
 
-        const member = await message.guild.members.fetch(message.author.id);
+        if (!role.editable) {
+          return message.reply("❌ No puedo administrar ese rol.");
+        }
 
-        if (member.roles.cache.has(role.id)) {
+        if (message.member.roles.cache.has(role.id)) {
           return message.reply("❌ Ya tienes ese rol.");
         }
 
-        if (
-          role.position >= message.guild.members.me.roles.highest.position
-        ) {
-          return message.reply("❌ No puedo entregar ese rol.");
-        }
-
-        await member.roles.add(role);
+        await message.member.roles.add(role);
 
         await pool.query(
           `
           UPDATE users
           SET coins = coins - $1
-          WHERE guild_id=$2 AND user_id=$3
+          WHERE guild_id = $2 AND user_id = $3
           `,
-          [item.price, message.guild.id, message.author.id]
+          [
+            item.price,
+            message.guild.id,
+            message.author.id
+          ]
         );
 
         return message.reply({
           embeds: [
             embed(
-              "🛒・COMPRA REALIZADA",
-              `Has comprado el rol ${role} por **${formatCoins(item.price)} monedas**. 💗`
+              "🛍️・Compra realizada",
+              `Has comprado ${role} por **${formatCoins(item.price)}**.`
             )
           ]
         });
       }
 
-      await pool.query(
-        `
-        UPDATE users
-        SET coins = coins - $1
-        WHERE guild_id=$2 AND user_id=$3
-        `,
-        [item.price, message.guild.id, message.author.id]
+      if (item.type === "message") {
+        await pool.query(
+          `
+          UPDATE users
+          SET coins = coins - $1
+          WHERE guild_id = $2 AND user_id = $3
+          `,
+          [
+            item.price,
+            message.guild.id,
+            message.author.id
+          ]
+        );
+
+        return message.reply({
+          embeds: [
+            embed(
+              "🛍️・Recompensa",
+              `Has comprado tu recompensa por **${formatCoins(item.price)}**.\n\n🎁 ${item.message}`
+            )
+          ]
+        });
+      }
+    }
+
+    // ==================================================
+    // BLACKJACK SIN APUESTAS
+    // ==================================================
+
+    if (["bj", "blackjack"].includes(command)) {
+      if (blackjackGames.has(message.author.id)) {
+        return message.reply(
+          "❌ Ya tienes una partida de blackjack activa."
+        );
+      }
+
+      const deck = [];
+
+      const suits = ["♠️", "♥️", "♦️", "♣️"];
+      const values = [
+        ["A", 11],
+        ["2", 2],
+        ["3", 3],
+        ["4", 4],
+        ["5", 5],
+        ["6", 6],
+        ["7", 7],
+        ["8", 8],
+        ["9", 9],
+        ["10", 10],
+        ["J", 10],
+        ["Q", 10],
+        ["K", 10]
+      ];
+
+      for (const suit of suits) {
+        for (const [name, value] of values) {
+          deck.push({
+            name,
+            value,
+            display: `${name}${suit}`
+          });
+        }
+      }
+
+      deck.sort(() => Math.random() - 0.5);
+
+      const player = [
+        deck.pop(),
+        deck.pop()
+      ];
+
+      const dealer = [
+        deck.pop(),
+        deck.pop()
+      ];
+
+      blackjackGames.set(message.author.id, {
+        deck,
+        player,
+        dealer
+      });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("bj_hit")
+          .setLabel("Pedir")
+          .setEmoji("🃏")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId("bj_stand")
+          .setLabel("Plantarse")
+          .setEmoji("✋")
+          .setStyle(ButtonStyle.Secondary)
       );
 
       return message.reply({
         embeds: [
-          embed(
-            "🛒・COMPRA REALIZADA",
-            `💬 Recompensa:\n${item.message}\n\n💰 Precio: **${formatCoins(item.price)}**`
+          blackjackEmbed(
+            message.author,
+            player,
+            dealer,
+            false
           )
-        ]
+        ],
+        components: [row]
       });
     }
 
@@ -1083,37 +1402,49 @@ client.on("messageCreate", async message => {
     // ==================================================
 
     if (["coin", "flip"].includes(command)) {
-      const result = Math.random() < 0.5 ? "🪙 Cara" : "🪙 Cruz";
+      const result = Math.random() < 0.5
+        ? "🪙 Cara"
+        : "🪙 Cruz";
 
       return message.reply({
         embeds: [
-          embed("🪙・MONEDA", `Resultado: **${result}**`)
+          embed(
+            "🪙・Moneda",
+            `${message.author} lanzó la moneda.\n\n**${result}**`
+          )
         ]
       });
     }
 
     if (["dice", "dado"].includes(command)) {
-      const number = random(1, 6);
+      const result = Math.floor(Math.random() * 6) + 1;
 
       return message.reply({
         embeds: [
-          embed("🎲・DADO", `Has sacado **${number}**.`)
+          embed(
+            "🎲・Dado",
+            `${message.author} lanzó un dado y obtuvo **${result}**.`
+          )
         ]
       });
     }
 
     if (command === "random") {
-      const max = Number(args[0]);
+      const min = Number(args[0]) || 1;
+      const max = Number(args[1]) || 100;
 
-      if (!max || max <= 0) {
-        return message.reply("❌ Usa `M!random número`.");
+      if (min >= max) {
+        return message.reply("❌ El mínimo debe ser menor que el máximo.");
       }
+
+      const result =
+        Math.floor(Math.random() * (max - min + 1)) + min;
 
       return message.reply({
         embeds: [
           embed(
-            "🎲・RANDOM",
-            `Número generado: **${random(1, max)}**`
+            "🎲・Número aleatorio",
+            `Resultado: **${result}**`
           )
         ]
       });
@@ -1121,16 +1452,16 @@ client.on("messageCreate", async message => {
 
     if (command === "choose") {
       if (args.length < 2) {
-        return message.reply("❌ Escribe al menos dos opciones separadas por espacios.");
+        return message.reply(
+          "❌ Usa: `M!choose opción1 opción2 opción3`"
+        );
       }
-
-      const choice = args[random(0, args.length - 1)];
 
       return message.reply({
         embeds: [
           embed(
-            "🤔・DECISIÓN",
-            `Akari ha elegido:\n\n💗 **${choice}**`
+            "🤔・Elección",
+            `He elegido: **${random(args)}**`
           )
         ]
       });
@@ -1138,19 +1469,20 @@ client.on("messageCreate", async message => {
 
     if (command === "8ball") {
       const answers = [
-        "Sí. 💗",
-        "No. 🌸",
-        "Probablemente.",
-        "No estoy segura.",
-        "Definitivamente sí.",
-        "Definitivamente no."
+        "Sí, definitivamente.",
+        "Probablemente sí.",
+        "No estoy seguro.",
+        "Probablemente no.",
+        "No.",
+        "Las estrellas dicen que sí.",
+        "Mejor inténtalo más tarde."
       ];
 
       return message.reply({
         embeds: [
           embed(
-            "🔮・8BALL",
-            answers[random(0, answers.length - 1)]
+            "🎱・8Ball",
+            `🔮 ${random(answers)}`
           )
         ]
       });
@@ -1158,108 +1490,149 @@ client.on("messageCreate", async message => {
 
     if (["rps", "ppt"].includes(command)) {
       const choices = ["piedra", "papel", "tijera"];
+
       const userChoice = args[0]?.toLowerCase();
 
       if (!choices.includes(userChoice)) {
         return message.reply(
-          "❌ Usa `M!rps piedra`, `M!rps papel` o `M!rps tijera`."
+          "❌ Usa: `M!rps piedra`, `M!rps papel` o `M!rps tijera`."
         );
       }
 
-      const botChoice = choices[random(0, 2)];
+      const botChoice = random(choices);
 
-      let result;
+      let result = "Empate.";
 
-      if (userChoice === botChoice) {
-        result = "🤝 ¡Empate!";
-      } else if (
+      if (
         (userChoice === "piedra" && botChoice === "tijera") ||
         (userChoice === "papel" && botChoice === "piedra") ||
         (userChoice === "tijera" && botChoice === "papel")
       ) {
-        result = "🎉 ¡Ganaste!";
-      } else {
-        result = "😼 ¡Akari ganó!";
+        result = "¡Ganaste! 🎉";
+      } else if (userChoice !== botChoice) {
+        result = "Gané yo. 😎";
       }
 
       return message.reply({
         embeds: [
           embed(
-            "✊・PIEDRA PAPEL TIJERA",
-            `👤 Tú: **${userChoice}**\n🌸 Akari: **${botChoice}**\n\n${result}`
+            "✂️・Piedra, Papel o Tijera",
+            `
+👤 Tú: **${userChoice}**
+🤖 Akari: **${botChoice}**
+
+🌸 ${result}
+`
           )
         ]
       });
     }
 
     if (command === "guess") {
-      const number = Number(args[0]);
-      const secret = random(1, 10);
+      const number = Math.floor(Math.random() * 10) + 1;
+      const guess = Number(args[0]);
 
-      if (!number || number < 1 || number > 10) {
-        return message.reply("❌ Elige un número del 1 al 10.");
+      if (!guess) {
+        return message.reply(
+          "❌ Adivina un número del **1 al 10**."
+        );
       }
 
       return message.reply({
         embeds: [
           embed(
-            "🎯・ADIVINA",
-            number === secret
-              ? `🎉 ¡Correcto! Era **${secret}**.`
-              : `❌ No era ese. El número era **${secret}**.`
+            "🎯・Adivina",
+            guess === number
+              ? "🎉 ¡Correcto! Adivinaste el número."
+              : `❌ No era ese. El número era **${number}**.`
+          )
+        ]
+      });
+    }
+
+    if (["trivia", "quiz"].includes(command)) {
+      const questions = [
+        {
+          q: "¿Cuál es el planeta conocido como el planeta rojo?",
+          a: "marte"
+        },
+        {
+          q: "¿Cuántos lados tiene un hexágono?",
+          a: "6"
+        },
+        {
+          q: "¿Cuál es el océano más grande?",
+          a: "pacifico"
+        }
+      ];
+
+      const question = random(questions);
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🧠・Trivia",
+            `**${question.q}**\n\nResponde en el chat.`
           )
         ]
       });
     }
 
     // ==================================================
-    // BLACKJACK SIN APUESTAS
+    // SOCIAL
     // ==================================================
 
-    if (["blackjack", "bj"].includes(command)) {
-      const key = `${message.guild.id}:${message.author.id}`;
+    if (["profile", "perfil"].includes(command)) {
+      const target =
+        message.mentions.users.first() ||
+        message.author;
 
-      if (blackjackGames.has(key)) {
-        return message.reply("❌ Ya tienes una partida de blackjack activa.");
-      }
-
-      const card = () => random(1, 11);
-
-      const player = [card(), card()];
-      const dealer = [card(), card()];
-
-      blackjackGames.set(key, {
-        player,
-        dealer
-      });
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`bj_hit_${message.author.id}`)
-          .setLabel("Pedir carta")
-          .setEmoji("🃏")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`bj_stand_${message.author.id}`)
-          .setLabel("Plantarse")
-          .setEmoji("🛑")
-          .setStyle(ButtonStyle.Secondary)
+      const user = await getUser(
+        message.guild.id,
+        target.id
       );
 
       return message.reply({
         embeds: [
           embed(
-            "🃏・BLACKJACK",
-            `Tus cartas: **${player.join(" + ")} = ${player.reduce((a, b) => a + b, 0)}**\n\nDealer muestra: **${dealer[0]} + ?**\n\n🌸 Este modo es solamente un minijuego y **no utiliza apuestas ni dinero**.`
-          )
-        ],
-        components: [row]
+            "💗・Perfil",
+            `
+👤 Usuario: ${target}
+
+💰 Dinero: **${formatCoins(
+              Number(user.coins) + Number(user.bank)
+            )}**
+
+💵 Efectivo: **${formatCoins(user.coins)}**
+🏦 Banco: **${formatCoins(user.bank)}**
+`
+          ).setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        ]
       });
     }
 
-    // ==================================================
-    // SOCIAL
-    // ==================================================
+    if (command === "avatar") {
+      const target =
+        message.mentions.users.first() ||
+        message.author;
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🖼️・Avatar",
+            `[Abrir avatar](${target.displayAvatarURL({
+              extension: "png",
+              size: 1024
+            })})`
+          ).setImage(
+            target.displayAvatarURL({
+              extension: "png",
+              size: 1024
+            })
+          )
+        ]
+      });
+    }
 
     if (["hug", "abrazo"].includes(command)) {
       const target = message.mentions.users.first();
@@ -1271,14 +1644,14 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🤗・ABRAZO",
-            `${message.author} le da un abrazo amistoso a ${target}. 🌸`
+            "🤗・Abrazo",
+            `${message.author} le da un abrazo amistoso a ${target}. 💗`
           )
         ]
       });
     }
 
-    if (command === "highfive") {
+    if (["highfive", "choca"].includes(command)) {
       const target = message.mentions.users.first();
 
       if (!target) {
@@ -1288,8 +1661,8 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🖐️・HIGH FIVE",
-            `${message.author} y ${target} chocan las manos. 💗`
+            "🙌・High Five",
+            `${message.author} y ${target} chocaron las manos. ✨`
           )
         ]
       });
@@ -1298,13 +1671,15 @@ client.on("messageCreate", async message => {
     if (command === "wave") {
       const target = message.mentions.users.first();
 
+      if (!target) {
+        return message.reply("❌ Menciona a alguien.");
+      }
+
       return message.reply({
         embeds: [
           embed(
-            "👋・SALUDO",
-            target
-              ? `${message.author} saluda a ${target}. 🌸`
-              : `${message.author} saluda a todos. 🌸`
+            "👋・Saludo",
+            `${message.author} saluda a ${target}. 🌸`
           )
         ]
       });
@@ -1320,49 +1695,9 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "💗・AMISTAD",
-            `${message.author} considera a ${target} una buena amistad. 🌸`
+            "🤝・Amistad",
+            `${message.author} quiere ser amigo/a de ${target}. 💗`
           )
-        ]
-      });
-    }
-
-    if (command === "profile" || command === "perfil") {
-      const target = message.mentions.users.first() || message.author;
-
-      const result = await pool.query(
-        `
-        SELECT coins, bank
-        FROM users
-        WHERE guild_id=$1 AND user_id=$2
-        `,
-        [message.guild.id, target.id]
-      );
-
-      const data = result.rows[0];
-
-      return message.reply({
-        embeds: [
-          embed(
-            "💗・PERFIL",
-            `👤 **Usuario:** ${target}\n\n💰 Efectivo: **${formatCoins(data.coins)}**\n🏦 Banco: **${formatCoins(data.bank)}**\n\n🌸 Gracias por formar parte de Akari Community.`
-          ).setThumbnail(target.displayAvatarURL({ dynamic: true }))
-        ]
-      });
-    }
-
-    if (command === "avatar") {
-      const target = message.mentions.users.first() || message.author;
-
-      return message.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(COLOR)
-            .setTitle(`🖼️・AVATAR DE ${target.username}`)
-            .setImage(target.displayAvatarURL({
-              extension: "png",
-              size: 1024
-            }))
         ]
       });
     }
@@ -1374,17 +1709,18 @@ client.on("messageCreate", async message => {
         return message.reply("❌ Menciona a alguien.");
       }
 
-      if (target.id === message.author.id) {
-        return message.reply("❌ No puedes darte reputación a ti mismo.");
+      if (target.bot) {
+        return message.reply("❌ No puedes dar reputación a bots.");
       }
 
       await pool.query(
         `
         INSERT INTO reputation
         (guild_id, user_id, reputation)
-        VALUES ($1,$2,1)
-        ON CONFLICT (guild_id,user_id)
-        DO UPDATE SET reputation = reputation + 1
+        VALUES ($1, $2, 1)
+        ON CONFLICT (guild_id, user_id)
+        DO UPDATE SET reputation =
+        reputation.reputation + 1
         `,
         [message.guild.id, target.id]
       );
@@ -1392,8 +1728,8 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "⭐・REPUTACIÓN",
-            `${message.author} le dio **+1 reputación** a ${target}. 💗`
+            "⭐・Reputación",
+            `${message.author} le dio **+1 reputación** a ${target}.`
           )
         ]
       });
@@ -1404,54 +1740,18 @@ client.on("messageCreate", async message => {
     // ==================================================
 
     if (command === "serverinfo") {
-      const guild = message.guild;
-
       return message.reply({
         embeds: [
           embed(
-            "🌸・SERVER INFO",
-            `🏠 Servidor: **${guild.name}**\n👥 Miembros: **${guild.memberCount}**\n💬 Canales: **${guild.channels.cache.size}**\n🎭 Roles: **${guild.roles.cache.size}**`
-          )
-        ]
-      });
-    }
-
-    if (command === "userinfo") {
-      const target = message.mentions.members.first() || message.member;
-
-      return message.reply({
-        embeds: [
-          embed(
-            "👤・USER INFO",
-            `👤 Usuario: ${target.user}\n🆔 ID: \`${target.id}\`\n📅 Cuenta creada: <t:${Math.floor(target.user.createdTimestamp / 1000)}:D>\n📥 Entró al servidor: ${target.joinedTimestamp ? `<t:${Math.floor(target.joinedTimestamp / 1000)}:D>` : "Desconocido"}`
-          )
-        ]
-      });
-    }
-
-    if (command === "roleinfo") {
-      const role = message.mentions.roles.first();
-
-      if (!role) {
-        return message.reply("❌ Menciona un rol.");
-      }
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🎭・ROLE INFO",
-            `🎭 Rol: ${role}\n🆔 ID: \`${role.id}\`\n👥 Miembros: **${role.members.size}**`
-          )
-        ]
-      });
-    }
-
-    if (command === "channelinfo") {
-      return message.reply({
-        embeds: [
-          embed(
-            "📺・CHANNEL INFO",
-            `📺 Canal: ${message.channel}\n🆔 ID: \`${message.channel.id}\`\n📌 Tipo: **${message.channel.type}**`
+            "📚・Información del servidor",
+            `
+🌸 Nombre: **${message.guild.name}**
+👑 Dueño: <@${message.guild.ownerId}>
+👥 Miembros: **${message.guild.memberCount}**
+💬 Canales: **${message.guild.channels.cache.size}**
+🎭 Roles: **${message.guild.roles.cache.size}**
+😀 Emojis: **${message.guild.emojis.cache.size}**
+`
           )
         ]
       });
@@ -1461,23 +1761,73 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "👥・MIEMBROS",
-            `Akari Community tiene actualmente **${message.guild.memberCount} miembros**. 🌸`
+            "👥・Miembros",
+            `Akari Community tiene **${message.guild.memberCount} miembros**.`
           )
         ]
       });
     }
 
-    if (command === "uptime") {
-      const seconds = Math.floor(process.uptime());
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
+    if (command === "userinfo") {
+      const target =
+        message.mentions.members.first() ||
+        message.member;
 
       return message.reply({
         embeds: [
           embed(
-            "⏱️・UPTIME",
-            `🌸 Akari lleva conectado:\n\n**${hours}h ${minutes}m**`
+            "👤・Información del usuario",
+            `
+👤 Usuario: ${target.user}
+🆔 ID: \`${target.id}\`
+📅 Cuenta: <t:${Math.floor(target.user.createdTimestamp / 1000)}:F>
+📥 Entró al servidor: ${target.joinedTimestamp
+              ? `<t:${Math.floor(target.joinedTimestamp / 1000)}:F>`
+              : "Desconocido"}
+`
+          ).setThumbnail(
+            target.user.displayAvatarURL({ dynamic: true })
+          )
+        ]
+      });
+    }
+
+    if (command === "roleinfo") {
+      const role =
+        message.mentions.roles.first() ||
+        message.guild.roles.cache.get(args[0]);
+
+      if (!role) {
+        return message.reply("❌ Menciona un rol.");
+      }
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🎭・Información del rol",
+            `
+🎭 Rol: ${role}
+🆔 ID: \`${role.id}\`
+👥 Miembros: **${role.members.size}**
+📌 Posición: **${role.position}**
+`
+          )
+        ]
+      });
+    }
+
+    if (command === "channelinfo") {
+      const channel = message.mentions.channels.first() || message.channel;
+
+      return message.reply({
+        embeds: [
+          embed(
+            "📺・Información del canal",
+            `
+📺 Canal: ${channel}
+🆔 ID: \`${channel.id}\`
+📂 Tipo: **${channel.type}**
+`
           )
         ]
       });
@@ -1487,8 +1837,59 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🤖・AKARI BOT",
-            `🌸 Nombre: **${client.user.username}**\n🏠 Servidores: **${client.guilds.cache.size}**\n⚡ Ping: **${client.ws.ping}ms**\n💗 Prefix: \`${PREFIX}\``
+            "🤖・Información de Akari",
+            `
+🌸 Nombre: **Akari Bot**
+📌 Prefijo: \`${PREFIX}\`
+🏠 Servidores: **${client.guilds.cache.size}**
+👥 Usuarios: **${client.users.cache.size}**
+🏓 Ping: **${client.ws.ping}ms**
+⏱️ Uptime: **${Math.floor(client.uptime / 1000)}s**
+`
+          )
+        ]
+      });
+    }
+
+    if (command === "uptime") {
+      const seconds = Math.floor(client.uptime / 1000);
+
+      return message.reply({
+        embeds: [
+          embed(
+            "⏱️・Uptime",
+            `Akari lleva funcionando **${seconds} segundos**.`
+          )
+        ]
+      });
+    }
+
+    if (command === "roles") {
+      const roles = message.guild.roles.cache
+        .filter(r => r.id !== message.guild.id)
+        .map(r => r.toString())
+        .slice(0, 50);
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🎭・Roles",
+            roles.join(" ") || "No hay roles."
+          )
+        ]
+      });
+    }
+
+    if (command === "emojis") {
+      const emojis = message.guild.emojis.cache;
+
+      return message.reply({
+        embeds: [
+          embed(
+            "😀・Emojis",
+            emojis.size
+              ? emojis.map(e => e.toString()).join(" ")
+              : "No hay emojis."
           )
         ]
       });
@@ -1502,15 +1903,19 @@ client.on("messageCreate", async message => {
       const expression = args.join(" ");
 
       if (!expression) {
-        return message.reply("❌ Escribe una operación.");
+        return message.reply(
+          "❌ Usa: `M!calc 10 + 5`"
+        );
       }
 
-      if (!/^[0-9+\-*/().%\s]+$/.test(expression)) {
+      if (!/^[0-9+\-*/(). %]+$/.test(expression)) {
         return message.reply("❌ Solo se permiten operaciones matemáticas básicas.");
       }
 
       try {
-        const result = Function(`"use strict"; return (${expression})`)();
+        const result = Function(
+          `"use strict"; return (${expression})`
+        )();
 
         if (!Number.isFinite(result)) {
           return message.reply("❌ Resultado inválido.");
@@ -1519,8 +1924,8 @@ client.on("messageCreate", async message => {
         return message.reply({
           embeds: [
             embed(
-              "🧮・CALCULADORA",
-              `📌 Operación: \`${expression}\`\n\n✨ Resultado: **${result}**`
+              "🧮・Calculadora",
+              `\`${expression}\` = **${result}**`
             )
           ]
         });
@@ -1530,23 +1935,27 @@ client.on("messageCreate", async message => {
     }
 
     if (command === "poll") {
-      if (!args.length) {
-        return message.reply("❌ Usa `M!poll pregunta`.");
-      }
-
       const question = args.join(" ");
 
-      return message.channel.send({
+      if (!question) {
+        return message.reply(
+          "❌ Usa: `M!poll ¿Te gusta Akari?`"
+        );
+      }
+
+      const pollMessage = await message.channel.send({
         embeds: [
           embed(
-            "📊・ENCUESTA",
+            "📊・Encuesta",
             `**${question}**\n\n👍 Sí\n👎 No`
           )
         ]
-      }).then(async msg => {
-        await msg.react("👍");
-        await msg.react("👎");
       });
+
+      await pollMessage.react("👍");
+      await pollMessage.react("👎");
+
+      return;
     }
 
     // ==================================================
@@ -1557,109 +1966,110 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "🌸・ANIME",
-            `Bienvenido a la categoría anime de Akari. 💗\n\n` +
-            `🌸 \`${PREFIX}animechar\` — Personaje aleatorio\n` +
-            `📚 \`${PREFIX}animefact\` — Dato de anime\n` +
-            `💬 \`${PREFIX}animequote\` — Frase original\n` +
-            `🧠 \`${PREFIX}animequiz\` — Quiz anime\n` +
-            `🎲 \`${PREFIX}animechoose\` — Elige un personaje\n` +
-            `✨ \`${PREFIX}otaku\` — Perfil otaku`
+            "🌸・Categoría Anime",
+            `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+          🌸・ANIME
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 \`${PREFIX}animechar\`
+🎲 \`${PREFIX}animechoose\`
+💡 \`${PREFIX}animefact\`
+💬 \`${PREFIX}animequote\`
+🧠 \`${PREFIX}animequiz\`
+🌸 \`${PREFIX}anime\`
+✨ \`${PREFIX}otaku\`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💗 ¡Disfruta de la sección anime de Akari!
+`
           )
         ]
       });
     }
 
-    if (["animechar", "animecharacter"].includes(command)) {
-      const character =
-        animeCharacters[random(0, animeCharacters.length - 1)];
+    if (
+      command === "animechar" ||
+      command === "animecharacter"
+    ) {
+      const character = random(animeCharacters);
 
       return message.reply({
         embeds: [
           embed(
-            "🌸・PERSONAJE ANIME",
-            `Tu personaje aleatorio es:\n\n✨ **${character}**`
-          )
-        ]
-      });
-    }
+            "🌸・Personaje Anime",
+            `
+👤 Personaje: **${character.name}**
+📺 Anime: **${character.anime}**
 
-    if (command === "animefact") {
-      const fact = animeFacts[random(0, animeFacts.length - 1)];
-
-      return message.reply({
-        embeds: [
-          embed(
-            "📚・DATO ANIME",
-            `🌸 ${fact}`
-          )
-        ]
-      });
-    }
-
-    if (command === "animequote") {
-      const quote =
-        animeQuotes[random(0, animeQuotes.length - 1)];
-
-      return message.reply({
-        embeds: [
-          embed(
-            "💬・FRASE ANIME",
-            `「${quote}」`
-          )
-        ]
-      });
-    }
-
-    if (command === "animequiz") {
-      const quiz =
-        animeQuiz[random(0, animeQuiz.length - 1)];
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🧠・ANIME QUIZ",
-            `**${quiz.question}**\n\n` +
-            `A) ${quiz.options[0]}\n` +
-            `B) ${quiz.options[1]}\n` +
-            `C) ${quiz.options[2]}\n` +
-            `D) ${quiz.options[3]}\n\n` +
-            `💗 Responde con el nombre de tu opción.`
+💡 ${character.fact}
+`
           )
         ]
       });
     }
 
     if (command === "animechoose") {
-      const options = args.filter(Boolean);
-
-      if (options.length < 2) {
-        return message.reply(
-          "❌ Usa, por ejemplo: `M!animechoose Naruto Goku Luffy`."
-        );
-      }
-
-      const choice =
-        options[random(0, options.length - 1)];
+      const character = random(animeCharacters);
 
       return message.reply({
         embeds: [
           embed(
-            "🌸・ELECCIÓN ANIME",
-            `Akari eligió:\n\n✨ **${choice}**`
+            "🎲・Elección Anime",
+            `🌸 Akari ha elegido a **${character.name}** de **${character.anime}**.`
+          )
+        ]
+      });
+    }
+
+    if (command === "animefact") {
+      return message.reply({
+        embeds: [
+          embed(
+            "💡・Dato Anime",
+            `🌸 ${random(animeFacts)}`
+          )
+        ]
+      });
+    }
+
+    if (command === "animequote") {
+      return message.reply({
+        embeds: [
+          embed(
+            "💬・Frase Anime",
+            `🌸 ${random(animeQuotes)}`
+          )
+        ]
+      });
+    }
+
+    if (command === "animequiz") {
+      const quiz = random(animeQuizQuestions);
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🧠・Anime Quiz",
+            `
+🌸 **${quiz.question}**
+
+Escribe tu respuesta en el chat.
+`
           )
         ]
       });
     }
 
     if (command === "otaku") {
-      const level = random(1, 100);
+      const level = Math.floor(Math.random() * 101);
 
       return message.reply({
         embeds: [
           embed(
-            "🌸・NIVEL OTAKU",
-            `${message.author}\n\n✨ Tu nivel otaku aleatorio es:\n\n**${level}%** 🌸`
+            "🌸・Nivel Otaku",
+            `${message.author}, tu nivel otaku es de **${level}%**. ✨`
           )
         ]
       });
@@ -1671,17 +2081,17 @@ client.on("messageCreate", async message => {
 
     if (command === "admin") {
       if (!isAdmin(message.member)) {
-        return message.reply("❌ Solo los administradores pueden usar este comando.");
+        return message.reply("❌ No tienes permiso para usar este comando.");
       }
 
       const menu = new StringSelectMenuBuilder()
         .setCustomId("admin_menu")
-        .setPlaceholder("⚙️ Selecciona una sección")
-        .addOptions(
+        .setPlaceholder("🛡️ Selecciona una sección")
+        .addOptions([
           {
             label: "Moderación",
-            description: "Warnings, mute, kick, ban y clear",
-            value: "moderacion",
+            description: "Warn, timeout, kick, ban y clear",
+            value: "moderation",
             emoji: "🛡️"
           },
           {
@@ -1692,35 +2102,41 @@ client.on("messageCreate", async message => {
           },
           {
             label: "Configuración",
-            description: "Configuración del servidor",
-            value: "configuracion",
+            description: "Configuraciones del servidor",
+            value: "config",
             emoji: "⚙️"
           },
           {
             label: "Economía",
-            description: "Configuración de la tienda",
-            value: "economia",
+            description: "Administración de economía y tienda",
+            value: "economy_admin",
             emoji: "💰"
           },
           {
             label: "Información",
             description: "Información administrativa",
-            value: "informacion",
+            value: "info_admin",
             emoji: "📊"
           },
           {
             label: "Bienvenidas",
-            description: "Configurar canal de bienvenida",
-            value: "bienvenidas",
+            description: "Configurar bienvenida",
+            value: "welcome",
             emoji: "👋"
           }
-        );
+        ]);
 
       return message.reply({
         embeds: [
           embed(
-            "⚙️・AKARI ADMIN",
-            `Panel administrativo de **Akari Community**.\n\nSelecciona una sección para ver las herramientas disponibles.`
+            "🛡️・Panel de Administración",
+            `
+🌸 Bienvenido al panel administrativo de Akari.
+
+Selecciona una sección en el menú para consultar los comandos disponibles.
+
+⚠️ Este panel es exclusivo para administradores.
+`
           )
         ],
         components: [
@@ -1735,7 +2151,7 @@ client.on("messageCreate", async message => {
 
     if (command === "setwelcome") {
       if (!isAdmin(message.member)) {
-        return message.reply("❌ Solo administradores.");
+        return message.reply("❌ No tienes permiso.");
       }
 
       const channel =
@@ -1744,7 +2160,7 @@ client.on("messageCreate", async message => {
 
       if (!channel) {
         return message.reply(
-          "❌ Menciona el canal donde quieres las bienvenidas."
+          "❌ Usa: `M!setwelcome #canal`"
         );
       }
 
@@ -1752,9 +2168,9 @@ client.on("messageCreate", async message => {
         `
         INSERT INTO settings
         (guild_id, welcome_channel)
-        VALUES ($1,$2)
+        VALUES ($1, $2)
         ON CONFLICT (guild_id)
-        DO UPDATE SET welcome_channel=$2
+        DO UPDATE SET welcome_channel = EXCLUDED.welcome_channel
         `,
         [message.guild.id, channel.id]
       );
@@ -1762,348 +2178,69 @@ client.on("messageCreate", async message => {
       return message.reply({
         embeds: [
           embed(
-            "👋・BIENVENIDAS CONFIGURADAS",
-            `Las bienvenidas ahora se enviarán en ${channel}. 🌸`
+            "👋・Bienvenidas",
+            `El canal de bienvenida ahora es ${channel}.`
           )
         ]
       });
     }
 
     // ==================================================
-    // SHOP EDIT
-    // ==================================================
-
-    if (command === "shopedit") {
-      if (!isAdmin(message.member)) {
-        return message.reply("❌ Solo administradores.");
-      }
-
-      const type = args.shift()?.toLowerCase();
-
-      if (!type || !["rol", "role", "mensaje", "message"].includes(type)) {
-        return message.reply(
-          `❌ Uso:\n\`${PREFIX}shopedit rol @Rol cantidad\`\n\`${PREFIX}shopedit mensaje texto cantidad\``
-        );
-      }
-
-      if (["rol", "role"].includes(type)) {
-        const role = message.mentions.roles.first();
-        const price = Number(args[args.length - 1]);
-
-        if (!role) {
-          return message.reply("❌ Debes mencionar un rol.");
-        }
-
-        if (!Number.isInteger(price) || price <= 0) {
-          return message.reply("❌ Debes indicar un precio válido.");
-        }
-
-        await pool.query(
-          `
-          INSERT INTO shop_items
-          (guild_id, type, target_id, message, price)
-          VALUES ($1,'role',$2,NULL,$3)
-          `,
-          [message.guild.id, role.id, price]
-        );
-
-        return message.reply({
-          embeds: [
-            embed(
-              "🛒・SHOP EDIT",
-              `🎭 Rol añadido a la tienda: ${role}\n💰 Precio: **${formatCoins(price)}**`
-            )
-          ]
-        });
-      }
-
-      const price = Number(args[args.length - 1]);
-      const text = args.slice(0, -1).join(" ");
-
-      if (!text || !Number.isInteger(price) || price <= 0) {
-        return message.reply(
-          `❌ Uso: \`${PREFIX}shopedit mensaje Texto de recompensa 500\``
-        );
-      }
-
-      await pool.query(
-        `
-        INSERT INTO shop_items
-        (guild_id, type, target_id, message, price)
-        VALUES ($1,'message',NULL,$2,$3)
-        `,
-        [message.guild.id, text, price]
-      );
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🛒・SHOP EDIT",
-            `💬 Recompensa añadida:\n${text}\n\n💰 Precio: **${formatCoins(price)}**`
-          )
-        ]
-      });
-    }
-
-    // ==================================================
-    // MODERACIÓN
-    // ==================================================
-
-    if (["warn", "warnings", "warns"].includes(command)) {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const target =
-        message.mentions.members.first();
-
-      if (!target) {
-        return message.reply("❌ Menciona a un usuario.");
-      }
-
-      if (command !== "warn") {
-        const result = await pool.query(
-          `
-          SELECT COUNT(*)::int AS total
-          FROM warnings
-          WHERE guild_id=$1 AND user_id=$2
-          `,
-          [message.guild.id, target.id]
-        );
-
-        return message.reply({
-          embeds: [
-            embed(
-              "⚠️・WARNINGS",
-              `${target} tiene **${result.rows[0].total} warnings**.`
-            )
-          ]
-        });
-      }
-
-      const reason =
-        args.slice(1).join(" ") || "Sin razón especificada";
-
-      const total = await addWarning(
-        message.guild.id,
-        target.id,
-        message.author.id,
-        reason
-      );
-
-      if (total >= 3 && target.moderatable) {
-        await target.timeout(
-          60 * 60 * 1000,
-          "3 warnings acumulados."
-        ).catch(() => {});
-
-        return message.reply({
-          embeds: [
-            embed(
-              "🔇・MUTE",
-              `${target} recibió su **3.er warning**.\n\n⏰ Mute aplicado: **1 hora**\n📝 Razón: ${reason}`
-            )
-          ]
-        });
-      }
-
-      return message.reply({
-        embeds: [
-          embed(
-            "⚠️・WARNING",
-            `${target} recibió un warning.\n\n📊 Total: **${total}/3**\n📝 Razón: ${reason}`
-          )
-        ]
-      });
-    }
-
-    if (command === "timeout") {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const target = message.mentions.members.first();
-      const minutes = Number(args[1] || args[0]);
-
-      if (!target || !minutes || minutes <= 0) {
-        return message.reply(
-          "❌ Uso: `M!timeout @usuario minutos`."
-        );
-      }
-
-      if (!target.moderatable) {
-        return message.reply("❌ No puedo aplicar timeout a ese usuario.");
-      }
-
-      await target.timeout(
-        minutes * 60 * 1000,
-        "Moderación de Akari."
-      );
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🔇・TIMEOUT",
-            `${target} recibió un timeout de **${minutes} minutos**.`
-          )
-        ]
-      });
-    }
-
-    if (command === "untimeout") {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const target = message.mentions.members.first();
-
-      if (!target) {
-        return message.reply("❌ Menciona a un usuario.");
-      }
-
-      await target.timeout(null, "Timeout retirado.");
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🔊・TIMEOUT RETIRADO",
-            `Se retiró el timeout de ${target}.`
-          )
-        ]
-      });
-    }
-
-    if (command === "kick") {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const target = message.mentions.members.first();
-
-      if (!target) {
-        return message.reply("❌ Menciona a un usuario.");
-      }
-
-      if (!target.kickable) {
-        return message.reply("❌ No puedo expulsar a ese usuario.");
-      }
-
-      await target.kick(
-        args.slice(1).join(" ") || "Sin razón"
-      );
-
-      return message.reply({
-        embeds: [
-          embed(
-            "👢・KICK",
-            `${target.user.tag} fue expulsado del servidor.`
-          )
-        ]
-      });
-    }
-
-    if (command === "ban") {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const target = message.mentions.members.first();
-
-      if (!target) {
-        return message.reply("❌ Menciona a un usuario.");
-      }
-
-      if (!target.bannable) {
-        return message.reply("❌ No puedo banear a ese usuario.");
-      }
-
-      await target.ban({
-        reason: args.slice(1).join(" ") || "Sin razón"
-      });
-
-      return message.reply({
-        embeds: [
-          embed(
-            "🔨・BAN",
-            `${target.user.tag} fue baneado del servidor.`
-          )
-        ]
-      });
-    }
-
-    if (command === "clear") {
-      if (!isStaff(message.member)) {
-        return message.reply("❌ No tienes permisos.");
-      }
-
-      const amount = Number(args[0]);
-
-      if (!amount || amount < 1 || amount > 100) {
-        return message.reply(
-          "❌ Indica una cantidad entre 1 y 100."
-        );
-      }
-
-      await message.channel.bulkDelete(amount, true);
-
-      return message.channel.send({
-        embeds: [
-          embed(
-            "🧹・CLEAR",
-            `Se eliminaron **${amount} mensajes**.`
-          )
-        ]
-      }).then(msg => {
-        setTimeout(() => msg.delete().catch(() => {}), 5000);
-      });
-    }
-
-    // ==================================================
-    // TICKETS
+    // TICKET PANEL
     // ==================================================
 
     if (command === "ticketpanel") {
       if (!isAdmin(message.member)) {
-        return message.reply("❌ Solo administradores.");
+        return message.reply("❌ No tienes permiso.");
       }
 
       const menu = new StringSelectMenuBuilder()
         .setCustomId("ticket_menu")
-        .setPlaceholder("👇 Selecciona una categoría")
-        .addOptions(
+        .setPlaceholder("🎫 Selecciona una categoría")
+        .addOptions([
           {
             label: "Soporte",
+            description: "Necesito ayuda",
             value: "Soporte",
             emoji: "🛠️"
           },
           {
             label: "Reporte",
+            description: "Reportar un usuario o situación",
             value: "Reporte",
             emoji: "🚨"
           },
           {
             label: "Duda",
+            description: "Tengo una duda",
             value: "Duda",
             emoji: "❓"
           },
           {
             label: "Allys/Affys/Socio",
+            description: "Solicitudes de colaboración",
             value: "Allys/Affys/Socio",
             emoji: "🤝"
           },
           {
             label: "Postulación",
+            description: "Enviar una postulación",
             value: "Postulación",
             emoji: "📝"
           },
           {
             label: "Otro",
+            description: "Otra solicitud",
             value: "Otro",
             emoji: "📌"
           }
-        );
+        ]);
 
-      const text = `
+      return message.channel.send({
+        embeds: [
+          embed(
+            "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
+            `
 ╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
        🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
           🎫・TICKETS
@@ -2141,11 +2278,8 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
 
              👇 Selecciona una categoría
                 para abrir tu ticket.
-`;
-
-      return message.channel.send({
-        embeds: [
-          embed("🌸・AKARI COMMUNITY", text)
+`
+          )
         ],
         components: [
           new ActionRowBuilder().addComponents(menu)
@@ -2153,16 +2287,548 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
       });
     }
 
+    // ==================================================
+    // SHOPEDIT
+    // ==================================================
+
+    if (command === "shopedit") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const type = args.shift()?.toLowerCase();
+
+      if (!type) {
+        return message.reply(
+          `
+❌ Usa:
+
+\`${PREFIX}shopedit rol @Rol cantidad\`
+
+o
+
+\`${PREFIX}shopedit mensaje texto cantidad\`
+`
+        );
+      }
+
+      if (type === "rol" || type === "role") {
+        const role = message.mentions.roles.first();
+        const price = parseAmount(args[1]);
+
+        if (!role || !price) {
+          return message.reply(
+            `❌ Usa: \`${PREFIX}shopedit rol @Rol cantidad\``
+          );
+        }
+
+        await pool.query(
+          `
+          INSERT INTO shop_items
+          (guild_id, type, target_id, price)
+          VALUES ($1, 'role', $2, $3)
+          `,
+          [
+            message.guild.id,
+            role.id,
+            price
+          ]
+        );
+
+        return message.reply({
+          embeds: [
+            embed(
+              "🛒・Tienda actualizada",
+              `
+🎭 Rol: ${role}
+💰 Precio: **${formatCoins(price)}**
+
+El rol fue añadido a la tienda.
+`
+            )
+          ]
+        });
+      }
+
+      if (type === "mensaje" || type === "message") {
+        const price = parseAmount(args[args.length - 1]);
+
+        if (!price) {
+          return message.reply(
+            `❌ Usa: \`${PREFIX}shopedit mensaje texto cantidad\``
+          );
+        }
+
+        const text = args
+          .slice(0, -1)
+          .join(" ");
+
+        if (!text) {
+          return message.reply("❌ Escribe el mensaje/recompensa.");
+        }
+
+        await pool.query(
+          `
+          INSERT INTO shop_items
+          (guild_id, type, message, price)
+          VALUES ($1, 'message', $2, $3)
+          `,
+          [
+            message.guild.id,
+            text,
+            price
+          ]
+        );
+
+        return message.reply({
+          embeds: [
+            embed(
+              "🛒・Tienda actualizada",
+              `
+🎁 Recompensa:
+**${text}**
+
+💰 Precio: **${formatCoins(price)}**
+`
+            )
+          ]
+        });
+      }
+
+      return message.reply("❌ Tipo inválido. Usa `rol` o `mensaje`.");
+    }
+
+    if (command === "shopdelete") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const id = Number(args[0]);
+
+      if (!id) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}shopdelete ID\``
+        );
+      }
+
+      const result = await pool.query(
+        `
+        DELETE FROM shop_items
+        WHERE id = $1 AND guild_id = $2
+        RETURNING id
+        `,
+        [id, message.guild.id]
+      );
+
+      if (!result.rows.length) {
+        return message.reply("❌ Ese producto no existe.");
+      }
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🗑️・Tienda",
+            `El producto **#${id}** fue eliminado.`
+          )
+        ]
+      });
+    }
+
+    // ==================================================
+    // ADMIN ECONOMÍA
+    // ==================================================
+
+    if (command === "addmoney") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const target = message.mentions.users.first();
+      const amount = parseAmount(args[1]);
+
+      if (!target || !amount) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}addmoney @usuario cantidad\``
+        );
+      }
+
+      await addCoins(
+        message.guild.id,
+        target.id,
+        amount
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "💰・Economía",
+            `Se añadieron **${formatCoins(amount)}** a ${target}.`
+          )
+        ]
+      });
+    }
+
+    if (command === "removemoney") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const target = message.mentions.users.first();
+      const amount = parseAmount(args[1]);
+
+      if (!target || !amount) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}removemoney @usuario cantidad\``
+        );
+      }
+
+      await ensureUser(
+        message.guild.id,
+        target.id
+      );
+
+      await pool.query(
+        `
+        UPDATE users
+        SET coins = GREATEST(0, coins - $1)
+        WHERE guild_id = $2 AND user_id = $3
+        `,
+        [
+          amount,
+          message.guild.id,
+          target.id
+        ]
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "💰・Economía",
+            `Se retiraron **${formatCoins(amount)}** a ${target}.`
+          )
+        ]
+      });
+    }
+
+    // ==================================================
+    // MODERACIÓN
+    // ==================================================
+
+    if (command === "warn") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target = message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}warn @usuario razón\``
+        );
+      }
+
+      const reason =
+        args.slice(1).join(" ") ||
+        "Sin razón especificada";
+
+      const total = await addWarning(
+        message.guild.id,
+        target.id,
+        message.author.id,
+        reason
+      );
+
+      if (total >= 3) {
+        try {
+          await target.timeout(
+            60 * 60 * 1000,
+            "3 warnings"
+          );
+        } catch {}
+      }
+
+      return message.reply({
+        embeds: [
+          embed(
+            "⚠️・Warn",
+            `
+👤 Usuario: ${target}
+📝 Razón: **${reason}**
+📊 Warns: **${total}/3**
+
+${total >= 3
+              ? "🔇 Se aplicó un mute de **1 hora**."
+              : "⚠️ Al llegar a 3 warns se aplicará un mute de 1 hora."}
+`
+          )
+        ]
+      });
+    }
+
+    if (command === "warnings" || command === "warns") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target =
+        message.mentions.users.first() ||
+        message.author;
+
+      const result = await pool.query(
+        `
+        SELECT reason, moderator_id, created_at
+        FROM warnings
+        WHERE guild_id = $1 AND user_id = $2
+        ORDER BY id DESC
+        LIMIT 10
+        `,
+        [message.guild.id, target.id]
+      );
+
+      if (!result.rows.length) {
+        return message.reply({
+          embeds: [
+            embed(
+              "⚠️・Warns",
+              `${target} no tiene warns.`
+            )
+          ]
+        });
+      }
+
+      let text = "";
+
+      result.rows.forEach((row, index) => {
+        text += `**${index + 1}.** ${row.reason}\n`;
+      });
+
+      return message.reply({
+        embeds: [
+          embed(
+            "⚠️・Warns",
+            `👤 ${target}\n\n${text}`
+          )
+        ]
+      });
+    }
+
+    if (command === "timeout" || command === "mute") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target = message.mentions.members.first();
+      const minutes = Number(args[1]) || 10;
+
+      if (!target) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}timeout @usuario minutos\``
+        );
+      }
+
+      await target.timeout(
+        minutes * 60 * 1000,
+        args.slice(2).join(" ") || "Moderación"
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🔇・Timeout",
+            `${target} ha recibido un timeout de **${minutes} minutos**.`
+          )
+        ]
+      });
+    }
+
+    if (command === "untimeout") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target = message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}untimeout @usuario\``
+        );
+      }
+
+      await target.timeout(null);
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🔊・Timeout retirado",
+            `Se retiró el timeout de ${target}.`
+          )
+        ]
+      });
+    }
+
+    if (command === "kick") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target = message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}kick @usuario razón\``
+        );
+      }
+
+      await target.kick(
+        args.slice(1).join(" ") || "Sin razón"
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "👢・Kick",
+            `${target.user.tag} fue expulsado.`
+          )
+        ]
+      });
+    }
+
+    if (command === "ban") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const target = message.mentions.members.first();
+
+      if (!target) {
+        return message.reply(
+          `❌ Usa: \`${PREFIX}ban @usuario razón\``
+        );
+      }
+
+      await target.ban({
+        reason:
+          args.slice(1).join(" ") ||
+          "Sin razón"
+      });
+
+      return message.reply({
+        embeds: [
+          embed(
+            "🔨・Ban",
+            `${target.user.tag} fue baneado.`
+          )
+        ]
+      });
+    }
+
+    if (command === "clear") {
+      if (!isStaff(message.member)) {
+        return message.reply("❌ No tienes permiso.");
+      }
+
+      const amount = Number(args[0]);
+
+      if (!amount || amount < 1 || amount > 100) {
+        return message.reply(
+          `❌ Usa una cantidad entre 1 y 100.`
+        );
+      }
+
+      const deleted =
+        await message.channel.bulkDelete(
+          amount,
+          true
+        );
+
+      const msg = await message.channel.send({
+        embeds: [
+          embed(
+            "🧹・Mensajes eliminados",
+            `Se eliminaron **${deleted.size} mensajes**.`
+          )
+        ]
+      });
+
+      setTimeout(() => {
+        msg.delete().catch(() => {});
+      }, 4000);
+
+      return;
+    }
+
   } catch (error) {
     console.error("❌ Error en messageCreate:", error);
 
-    if (!message.replied && !message.deferred) {
-      message.reply(
+    try {
+      await message.reply(
         "❌ Ocurrió un error al ejecutar ese comando."
-      ).catch(() => {});
-    }
+      );
+    } catch {}
   }
 });
+
+// ======================================================
+// BLACKJACK
+// ======================================================
+
+function blackjackValue(hand) {
+  let total = 0;
+  let aces = 0;
+
+  for (const card of hand) {
+    total += card.value;
+
+    if (card.name === "A") {
+      aces++;
+    }
+  }
+
+  while (total > 21 && aces > 0) {
+    total -= 10;
+    aces--;
+  }
+
+  return total;
+}
+
+function blackjackText(hand) {
+  return hand.map(card => card.display).join(" ");
+}
+
+function blackjackEmbed(user, player, dealer, finished) {
+  const playerValue = blackjackValue(player);
+
+  let dealerText;
+
+  if (finished) {
+    dealerText =
+      `${blackjackText(dealer)}\nValor: **${blackjackValue(dealer)}**`;
+  } else {
+    dealerText =
+      `${dealer[0].display} 🂠\nValor visible: **${blackjackValue([dealer[0]])}**`;
+  }
+
+  return embed(
+    "🃏・Blackjack",
+    `
+👤 ${user}
+
+🧑‍🎮 **Tus cartas**
+${blackjackText(player)}
+Valor: **${playerValue}**
+
+🤖 **Cartas de Akari**
+${dealerText}
+
+${finished
+      ? "🌸 Partida terminada."
+      : "Elige una acción usando los botones."}
+
+⚠️ Este blackjack es solo un minijuego y no utiliza apuestas ni dinero.
+`
+  );
+}
 
 // ======================================================
 // INTERACCIONES
@@ -2170,109 +2836,115 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
 
 client.on("interactionCreate", async interaction => {
   try {
-
     // ==================================================
-    // HELP MENU
+    // MENÚ HELP
     // ==================================================
 
     if (
       interaction.isStringSelectMenu() &&
       interaction.customId === "help_menu"
     ) {
-      const value = interaction.values[0];
+      let title = "";
+      let description = "";
 
-      const categories = {
-        economia: {
-          title: "💰・ECONOMÍA",
-          text:
-            `\`${PREFIX}balance\` — Ver dinero\n` +
-            `\`${PREFIX}daily\` — Recompensa diaria\n` +
-            `\`${PREFIX}work\` — Trabajar\n` +
-            `\`${PREFIX}beg\` — Pedir dinero\n` +
-            `\`${PREFIX}pay\` — Enviar dinero\n` +
-            `\`${PREFIX}deposit\` — Depositar\n` +
-            `\`${PREFIX}withdraw\` — Retirar\n` +
-            `\`${PREFIX}depositall\` — Depositar todo\n` +
-            `\`${PREFIX}withdrawall\` — Retirar todo\n` +
-            `\`${PREFIX}shop\` — Ver tienda\n` +
-            `\`${PREFIX}buy\` — Comprar\n` +
-            `\`${PREFIX}leaderboard\` — Top de riqueza`
-        },
+      if (interaction.values[0] === "economy") {
+        title = "💰・Economía";
+        description = `
+\`${PREFIX}balance\` — Ver dinero
+\`${PREFIX}daily\` — Recompensa diaria
+\`${PREFIX}work\` — Trabajar
+\`${PREFIX}beg\` — Pedir monedas
+\`${PREFIX}deposit\` — Depositar
+\`${PREFIX}depositall\` — Depositar todo
+\`${PREFIX}withdraw\` — Retirar
+\`${PREFIX}withdrawall\` — Retirar todo
+\`${PREFIX}pay\` — Enviar monedas
+\`${PREFIX}payall\` — Enviar a todos
+\`${PREFIX}bank\` — Ver banco
+\`${PREFIX}leaderboard\` — Ranking
+\`${PREFIX}shop\` — Tienda
+\`${PREFIX}buy\` — Comprar
+\`${PREFIX}bj\` — Blackjack sin apuestas
+`;
+      }
 
-        diversion: {
-          title: "🎮・DIVERSIÓN",
-          text:
-            `\`${PREFIX}coin\` — Lanzar moneda\n` +
-            `\`${PREFIX}dice\` — Lanzar dado\n` +
-            `\`${PREFIX}random\` — Número aleatorio\n` +
-            `\`${PREFIX}choose\` — Elegir opción\n` +
-            `\`${PREFIX}8ball\` — Bola mágica\n` +
-            `\`${PREFIX}rps\` — Piedra, papel o tijera\n` +
-            `\`${PREFIX}guess\` — Adivinar número\n` +
-            `\`${PREFIX}blackjack\` — Blackjack sin apuestas`
-        },
+      if (interaction.values[0] === "fun") {
+        title = "🎮・Diversión";
+        description = `
+\`${PREFIX}coin\`
+\`${PREFIX}dice\`
+\`${PREFIX}random\`
+\`${PREFIX}choose\`
+\`${PREFIX}8ball\`
+\`${PREFIX}rps\`
+\`${PREFIX}guess\`
+\`${PREFIX}quiz\`
+\`${PREFIX}bj\`
+`;
+      }
 
-        social: {
-          title: "💗・SOCIAL",
-          text:
-            `\`${PREFIX}profile\` — Ver perfil\n` +
-            `\`${PREFIX}avatar\` — Ver avatar\n` +
-            `\`${PREFIX}hug\` — Abrazo amistoso\n` +
-            `\`${PREFIX}highfive\` — High five\n` +
-            `\`${PREFIX}wave\` — Saludar\n` +
-            `\`${PREFIX}friend\` — Amistad\n` +
-            `\`${PREFIX}rep\` — Reputación`
-        },
+      if (interaction.values[0] === "social") {
+        title = "💗・Social";
+        description = `
+\`${PREFIX}profile\`
+\`${PREFIX}avatar\`
+\`${PREFIX}hug\`
+\`${PREFIX}highfive\`
+\`${PREFIX}wave\`
+\`${PREFIX}friend\`
+\`${PREFIX}rep\`
+`;
+      }
 
-        informacion: {
-          title: "📚・INFORMACIÓN",
-          text:
-            `\`${PREFIX}serverinfo\` — Información del servidor\n` +
-            `\`${PREFIX}userinfo\` — Información de usuario\n` +
-            `\`${PREFIX}roleinfo\` — Información de rol\n` +
-            `\`${PREFIX}channelinfo\` — Información del canal\n` +
-            `\`${PREFIX}membercount\` — Miembros\n` +
-            `\`${PREFIX}botinfo\` — Información de Akari\n` +
-            `\`${PREFIX}uptime\` — Tiempo conectado`
-        },
+      if (interaction.values[0] === "info") {
+        title = "📚・Información";
+        description = `
+\`${PREFIX}serverinfo\`
+\`${PREFIX}userinfo\`
+\`${PREFIX}roleinfo\`
+\`${PREFIX}channelinfo\`
+\`${PREFIX}botinfo\`
+\`${PREFIX}membercount\`
+\`${PREFIX}uptime\`
+\`${PREFIX}roles\`
+\`${PREFIX}emojis\`
+`;
+      }
 
-        utilidades: {
-          title: "🛠️・UTILIDADES",
-          text:
-            `\`${PREFIX}ping\` — Latencia\n` +
-            `\`${PREFIX}calc\` — Calculadora\n` +
-            `\`${PREFIX}poll\` — Crear encuesta`
-        },
+      if (interaction.values[0] === "utils") {
+        title = "🛠️・Utilidades";
+        description = `
+\`${PREFIX}ping\`
+\`${PREFIX}calc\`
+\`${PREFIX}poll\`
+`;
+      }
 
-        anime: {
-          title: "🌸・ANIME",
-          text:
-            `\`${PREFIX}anime\` — Menú anime\n` +
-            `\`${PREFIX}animechar\` — Personaje aleatorio\n` +
-            `\`${PREFIX}animefact\` — Dato anime\n` +
-            `\`${PREFIX}animequote\` — Frase original\n` +
-            `\`${PREFIX}animequiz\` — Quiz\n` +
-            `\`${PREFIX}animechoose\` — Elegir personaje\n` +
-            `\`${PREFIX}otaku\` — Nivel otaku`
-        }
-      };
-
-      const category = categories[value];
-
-      if (!category) return;
+      if (interaction.values[0] === "anime") {
+        title = "🌸・Anime";
+        description = `
+\`${PREFIX}anime\`
+\`${PREFIX}animechar\`
+\`${PREFIX}animechoose\`
+\`${PREFIX}animefact\`
+\`${PREFIX}animequote\`
+\`${PREFIX}animequiz\`
+\`${PREFIX}otaku\`
+`;
+      }
 
       return interaction.update({
         embeds: [
           embed(
-            category.title,
-            category.text
+            title,
+            description
           )
         ]
       });
     }
 
     // ==================================================
-    // ADMIN MENU
+    // MENÚ ADMIN
     // ==================================================
 
     if (
@@ -2281,85 +2953,101 @@ client.on("interactionCreate", async interaction => {
     ) {
       if (!isAdmin(interaction.member)) {
         return interaction.reply({
-          content: "❌ No tienes permisos.",
+          content: "❌ No tienes permiso.",
           ephemeral: true
         });
       }
 
-      const value = interaction.values[0];
+      let title = "";
+      let description = "";
 
-      const data = {
-        moderacion: {
-          title: "🛡️・MODERACIÓN",
-          text:
-            `\`${PREFIX}warn @usuario razón\`\n` +
-            `\`${PREFIX}warnings @usuario\`\n` +
-            `\`${PREFIX}timeout @usuario minutos\`\n` +
-            `\`${PREFIX}untimeout @usuario\`\n` +
-            `\`${PREFIX}kick @usuario\`\n` +
-            `\`${PREFIX}ban @usuario\`\n` +
-            `\`${PREFIX}clear cantidad\`\n\n` +
-            `🚨 Anti-spam activo:\n` +
-            `5 mensajes consecutivos → 1 Warn\n` +
-            `3 Warns → Mute de 1 hora`
-        },
+      if (interaction.values[0] === "moderation") {
+        title = "🛡️・Moderación";
+        description = `
+\`${PREFIX}warn @usuario razón\`
+\`${PREFIX}warnings @usuario\`
+\`${PREFIX}timeout @usuario minutos\`
+\`${PREFIX}untimeout @usuario\`
+\`${PREFIX}kick @usuario razón\`
+\`${PREFIX}ban @usuario razón\`
+\`${PREFIX}clear cantidad\`
 
-        tickets: {
-          title: "🎫・TICKETS",
-          text:
-            `\`${PREFIX}ticketpanel\` — Crear panel de tickets\n\n` +
-            `Categorías:\n` +
-            `🛠️ Soporte\n` +
-            `🚨 Reporte\n` +
-            `❓ Duda\n` +
-            `🤝 Allys/Affys/Socio\n` +
-            `📝 Postulación\n` +
-            `📌 Otro`
-        },
+🌸 Anti-Spam:
+5 mensajes seguidos → 1 warn.
+3 warns → mute de 1 hora.
+`;
+      }
 
-        configuracion: {
-          title: "⚙️・CONFIGURACIÓN",
-          text:
-            `\`${PREFIX}setwelcome #canal\` — Configurar bienvenidas`
-        },
+      if (interaction.values[0] === "tickets") {
+        title = "🎫・Tickets";
+        description = `
+\`${PREFIX}ticketpanel\`
 
-        economia: {
-          title: "💰・ECONOMÍA",
-          text:
-            `\`${PREFIX}shop\` — Ver tienda\n` +
-            `\`${PREFIX}shopedit rol @Rol cantidad\`\n` +
-            `\`${PREFIX}shopedit mensaje texto cantidad\`\n\n` +
-            `Los artículos pueden ser roles o recompensas de texto.`
-        },
+Categorías:
+🛠️ Soporte
+🚨 Reporte
+❓ Duda
+🤝 Allys/Affys/Socio
+📝 Postulación
+📌 Otro
+`;
+      }
 
-        informacion: {
-          title: "📊・INFORMACIÓN",
-          text:
-            `\`${PREFIX}serverinfo\`\n` +
-            `\`${PREFIX}membercount\`\n` +
-            `\`${PREFIX}botinfo\`\n` +
-            `\`${PREFIX}uptime\``
-        },
+      if (interaction.values[0] === "config") {
+        title = "⚙️・Configuración";
+        description = `
+\`${PREFIX}setwelcome #canal\`
 
-        bienvenidas: {
-          title: "👋・BIENVENIDAS",
-          text:
-            `\`${PREFIX}setwelcome #canal\`\n\n` +
-            `Configura el canal donde Akari enviará automáticamente el mensaje de bienvenida.`
-        }
-      };
+Configura el canal de bienvenida.
+`;
+      }
 
-      const selected = data[value];
+      if (interaction.values[0] === "economy_admin") {
+        title = "💰・Economía";
+        description = `
+\`${PREFIX}addmoney @usuario cantidad\`
+\`${PREFIX}removemoney @usuario cantidad\`
+
+🛒 Tienda:
+
+\`${PREFIX}shopedit rol @Rol cantidad\`
+\`${PREFIX}shopedit mensaje texto cantidad\`
+\`${PREFIX}shopdelete ID\`
+\`${PREFIX}shop\`
+`;
+      }
+
+      if (interaction.values[0] === "info_admin") {
+        title = "📊・Información";
+        description = `
+\`${PREFIX}serverinfo\`
+\`${PREFIX}membercount\`
+\`${PREFIX}botinfo\`
+\`${PREFIX}uptime\`
+`;
+      }
+
+      if (interaction.values[0] === "welcome") {
+        title = "👋・Bienvenidas";
+        description = `
+\`${PREFIX}setwelcome #canal\`
+
+Establece el canal donde Akari enviará las bienvenidas.
+`;
+      }
 
       return interaction.update({
         embeds: [
-          embed(selected.title, selected.text)
+          embed(
+            title,
+            description
+          )
         ]
       });
     }
 
     // ==================================================
-    // TICKETS MENU
+    // TICKETS
     // ==================================================
 
     if (
@@ -2367,37 +3055,56 @@ client.on("interactionCreate", async interaction => {
       interaction.customId === "ticket_menu"
     ) {
       const category = interaction.values[0];
-      const guild = interaction.guild;
 
       const existing = await pool.query(
         `
-        SELECT *
+        SELECT channel_id
         FROM tickets
-        WHERE guild_id=$1 AND user_id=$2
+        WHERE guild_id = $1 AND user_id = $2
         `,
-        [guild.id, interaction.user.id]
+        [
+          interaction.guild.id,
+          interaction.user.id
+        ]
       );
 
       if (existing.rows.length) {
-        const channel = guild.channels.cache.get(
-          existing.rows[0].channel_id
-        );
+        const existingChannel =
+          interaction.guild.channels.cache.get(
+            existing.rows[0].channel_id
+          );
 
-        return interaction.reply({
-          content: channel
-            ? `❌ Ya tienes un ticket abierto: ${channel}`
-            : "❌ Ya tienes un ticket abierto.",
-          ephemeral: true
-        });
+        if (existingChannel) {
+          return interaction.reply({
+            content: `❌ Ya tienes un ticket abierto: ${existingChannel}`,
+            ephemeral: true
+          });
+        }
+
+        await pool.query(
+          `
+          DELETE FROM tickets
+          WHERE guild_id = $1 AND user_id = $2
+          `,
+          [
+            interaction.guild.id,
+            interaction.user.id
+          ]
+        );
       }
 
-      const channel = await guild.channels.create({
-        name: `ticket-${interaction.user.username}`.toLowerCase().slice(0, 90),
+      const channel = await interaction.guild.channels.create({
+        name: `ticket-${interaction.user.username}`
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, "")
+          .slice(0, 80),
         type: ChannelType.GuildText,
         permissionOverwrites: [
           {
-            id: guild.roles.everyone.id,
-            deny: [PermissionsBitField.Flags.ViewChannel]
+            id: interaction.guild.roles.everyone.id,
+            deny: [
+              PermissionsBitField.Flags.ViewChannel
+            ]
           },
           {
             id: interaction.user.id,
@@ -2412,7 +3119,8 @@ client.on("interactionCreate", async interaction => {
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
-              PermissionsBitField.Flags.ReadMessageHistory
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels
             ]
           }
         ]
@@ -2421,11 +3129,11 @@ client.on("interactionCreate", async interaction => {
       await pool.query(
         `
         INSERT INTO tickets
-        (guild_id,user_id,channel_id,category)
-        VALUES ($1,$2,$3,$4)
+        (guild_id, user_id, channel_id, category)
+        VALUES ($1, $2, $3, $4)
         `,
         [
-          guild.id,
+          interaction.guild.id,
           interaction.user.id,
           channel.id,
           category
@@ -2476,21 +3184,24 @@ ${category}
 `;
 
       await channel.send({
-        content: `${interaction.user} <@&${STAFF_ROLE_ID}>`,
+        content: `<@${interaction.user.id}> <@&${STAFF_ROLE_ID}>`,
         embeds: [
-          embed("🌸・AKARI COMMUNITY", ticketText)
+          embed(
+            "🎫・Ticket abierto",
+            ticketText
+          )
         ],
         components: [buttons]
       });
 
       return interaction.reply({
-        content: `🎫 Ticket creado correctamente: ${channel}`,
+        content: `✅ Tu ticket ha sido creado: ${channel}`,
         ephemeral: true
       });
     }
 
     // ==================================================
-    // TICKET CLAIM
+    // RECLAMAR TICKET
     // ==================================================
 
     if (
@@ -2508,19 +3219,19 @@ ${category}
         `
         SELECT *
         FROM tickets
-        WHERE channel_id=$1
+        WHERE channel_id = $1
         `,
         [interaction.channel.id]
       );
 
-      if (!result.rows.length) {
+      const ticket = result.rows[0];
+
+      if (!ticket) {
         return interaction.reply({
           content: "❌ Este canal no es un ticket.",
           ephemeral: true
         });
       }
-
-      const ticket = result.rows[0];
 
       if (ticket.claimed_by) {
         return interaction.reply({
@@ -2532,16 +3243,19 @@ ${category}
       await pool.query(
         `
         UPDATE tickets
-        SET claimed_by=$1
-        WHERE channel_id=$2
+        SET claimed_by = $1
+        WHERE channel_id = $2
         `,
-        [interaction.user.id, interaction.channel.id]
+        [
+          interaction.user.id,
+          interaction.channel.id
+        ]
       );
 
       return interaction.reply({
         embeds: [
           embed(
-            "🎫・TICKET RECLAMADO",
+            "🎫・Ticket reclamado",
             `Este ticket ha sido reclamado por ${interaction.user}.`
           )
         ]
@@ -2549,7 +3263,7 @@ ${category}
     }
 
     // ==================================================
-    // TICKET CLOSE
+    // CERRAR TICKET
     // ==================================================
 
     if (
@@ -2566,73 +3280,77 @@ ${category}
       await interaction.reply({
         embeds: [
           embed(
-            "🔒・TICKET CERRADO",
-            "Este ticket será eliminado en **5 segundos**."
+            "🔒・Cerrando ticket",
+            "Este ticket será cerrado en unos segundos."
           )
         ]
       });
 
-      await pool.query(
-        `
-        DELETE FROM tickets
-        WHERE channel_id=$1
-        `,
-        [interaction.channel.id]
-      );
+      setTimeout(async () => {
+        try {
+          await pool.query(
+            `
+            DELETE FROM tickets
+            WHERE channel_id = $1
+            `,
+            [interaction.channel.id]
+          );
 
-      setTimeout(() => {
-        interaction.channel.delete().catch(() => {});
+          await interaction.channel.delete();
+        } catch (error) {
+          console.error("Error cerrando ticket:", error);
+        }
       }, 5000);
 
       return;
     }
 
     // ==================================================
-    // BLACKJACK BUTTONS
+    // BLACKJACK BOTONES
     // ==================================================
 
     if (
       interaction.isButton() &&
-      (
-        interaction.customId.startsWith("bj_hit_") ||
-        interaction.customId.startsWith("bj_stand_")
-      )
+      ["bj_hit", "bj_stand"].includes(interaction.customId)
     ) {
-      const userId = interaction.customId.split("_")[2];
-
-      if (interaction.user.id !== userId) {
-        return interaction.reply({
-          content: "❌ Esta partida pertenece a otro usuario.",
-          ephemeral: true
-        });
-      }
-
-      const key = `${interaction.guild.id}:${interaction.user.id}`;
-      const game = blackjackGames.get(key);
+      const game = blackjackGames.get(
+        interaction.user.id
+      );
 
       if (!game) {
         return interaction.reply({
-          content: "❌ Esta partida ya terminó.",
+          content: "❌ No tienes una partida activa.",
           ephemeral: true
         });
       }
 
-      const total = game.player.reduce((a, b) => a + b, 0);
+      // PEDIR CARTA
+      if (interaction.customId === "bj_hit") {
+        game.player.push(game.deck.pop());
 
-      if (interaction.customId.startsWith("bj_hit_")) {
-        game.player.push(random(1, 11));
+        const value = blackjackValue(game.player);
 
-        const newTotal = game.player.reduce((a, b) => a + b, 0);
+        if (value >= 21) {
+          blackjackGames.delete(interaction.user.id);
 
-        if (newTotal > 21) {
-          blackjackGames.delete(key);
+          let result;
+
+          if (value === 21) {
+            result = "🎉 ¡Blackjack! Llegaste a 21.";
+          } else {
+            result = "💥 Te pasaste de 21.";
+          }
 
           return interaction.update({
             embeds: [
-              embed(
-                "🃏・BLACKJACK",
-                `Tus cartas: **${game.player.join(" + ")} = ${newTotal}**\n\n💥 Te pasaste de 21.\n\n🌸 Fin de la partida.`
-              )
+              blackjackEmbed(
+                interaction.user,
+                game.player,
+                game.dealer,
+                true
+              ).setFooter({
+                text: result
+              })
             ],
             components: []
           });
@@ -2640,82 +3358,100 @@ ${category}
 
         return interaction.update({
           embeds: [
-            embed(
-              "🃏・BLACKJACK",
-              `Tus cartas: **${game.player.join(" + ")} = ${newTotal}**\n\nDealer muestra: **${game.dealer[0]} + ?**`
+            blackjackEmbed(
+              interaction.user,
+              game.player,
+              game.dealer,
+              false
             )
           ]
         });
       }
 
-      while (game.dealer.reduce((a, b) => a + b, 0) < 17) {
-        game.dealer.push(random(1, 11));
+      // PLANTARSE
+      if (interaction.customId === "bj_stand") {
+        while (
+          blackjackValue(game.dealer) < 17
+        ) {
+          game.dealer.push(game.deck.pop());
+        }
+
+        const playerValue =
+          blackjackValue(game.player);
+
+        const dealerValue =
+          blackjackValue(game.dealer);
+
+        let result;
+
+        if (dealerValue > 21) {
+          result = "🎉 ¡Ganaste! Akari se pasó de 21.";
+        } else if (playerValue > dealerValue) {
+          result = "🎉 ¡Ganaste!";
+        } else if (playerValue < dealerValue) {
+          result = "🤖 Akari ganó.";
+        } else {
+          result = "🤝 Empate.";
+        }
+
+        blackjackGames.delete(
+          interaction.user.id
+        );
+
+        return interaction.update({
+          embeds: [
+            blackjackEmbed(
+              interaction.user,
+              game.player,
+              game.dealer,
+              true
+            ).setFooter({
+              text: result
+            })
+          ],
+          components: []
+        });
       }
-
-      const playerTotal = game.player.reduce((a, b) => a + b, 0);
-      const dealerTotal = game.dealer.reduce((a, b) => a + b, 0);
-
-      let result;
-
-      if (dealerTotal > 21) {
-        result = "🎉 ¡Ganaste!";
-      } else if (playerTotal > dealerTotal) {
-        result = "🎉 ¡Ganaste!";
-      } else if (playerTotal === dealerTotal) {
-        result = "🤝 ¡Empate!";
-      } else {
-        result = "🌸 Ganó el dealer.";
-      }
-
-      blackjackGames.delete(key);
-
-      return interaction.update({
-        embeds: [
-          embed(
-            "🃏・BLACKJACK",
-            `👤 Tus cartas: **${game.player.join(" + ")} = ${playerTotal}**\n` +
-            `🌸 Dealer: **${game.dealer.join(" + ")} = ${dealerTotal}**\n\n` +
-            `${result}`
-          )
-        ],
-        components: []
-      });
     }
 
   } catch (error) {
     console.error("❌ Error en interactionCreate:", error);
 
     if (!interaction.replied && !interaction.deferred) {
-      interaction.reply({
-        content: "❌ Ocurrió un error.",
-        ephemeral: true
-      }).catch(() => {});
+      try {
+        await interaction.reply({
+          content: "❌ Ocurrió un error.",
+          ephemeral: true
+        });
+      } catch {}
     }
   }
 });
 
 // ======================================================
-// START
+// INICIO
 // ======================================================
 
 async function start() {
-  console.log("🌸 AKARI: entrando en start()...");
-  console.log("🌸 Conectando con PostgreSQL...");
+  try {
+    console.log("🌸 AKARI: entrando en start()...");
+    console.log("🌸 Conectando con PostgreSQL...");
 
-  await pool.query("SELECT 1");
+    await pool.query("SELECT 1");
 
-  console.log("✅ PostgreSQL conectado correctamente.");
+    console.log("✅ PostgreSQL conectado correctamente.");
 
-  await createTables();
+    await createTables();
 
-  console.log("🌸 Conectando con Discord...");
+    console.log("🌸 Conectando con Discord...");
 
-  await client.login(TOKEN);
+    await client.login(TOKEN);
 
-  console.log("✅ Login de Discord realizado.");
+    console.log("✅ Login de Discord realizado.");
+  } catch (error) {
+    console.error("❌ Error iniciando Akari:", error);
+    process.exit(1);
+  }
 }
 
-start().catch(error => {
-  console.error("❌ ERROR FATAL:");
-  console.error(error);
-});
+start();

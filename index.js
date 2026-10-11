@@ -12,14 +12,36 @@ const {
 } = require("discord.js");
 
 const { Pool } = require("pg");
+const http = require("http");
+
+// =========================
+// CONFIGURACIÓN
+// =========================
 
 const PREFIX = "M!";
 const PINK = 0xFF9DCC;
+const PORT = process.env.PORT || 10000;
 
 console.log("🌸 AKARI: index.js se está ejecutando...");
 
 // =========================
-// VARIABLES
+// SERVIDOR HTTP PARA RENDER
+// =========================
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/plain; charset=utf-8"
+  });
+
+  res.end("Akari Bot está funcionando 🌸");
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Servidor HTTP escuchando en el puerto ${PORT}`);
+});
+
+// =========================
+// VARIABLES DE ENTORNO
 // =========================
 
 if (!process.env.DISCORD_TOKEN) {
@@ -41,24 +63,21 @@ console.log("🌸 AKARI: variables de entorno encontradas.");
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 
-  // Render PostgreSQL normalmente necesita SSL
   ssl: {
     rejectUnauthorized: false
   },
 
-  // Evita que se quede esperando indefinidamente
   connectionTimeoutMillis: 10000,
 
-  // Mantener las conexiones controladas
   max: 5
 });
 
-pool.on("error", (err) => {
-  console.error("❌ Error de PostgreSQL:", err.message);
+pool.on("error", (error) => {
+  console.error("❌ Error de PostgreSQL:", error.message);
 });
 
 // =========================
-// DISCORD
+// DISCORD CLIENT
 // =========================
 
 const client = new Client({
@@ -159,7 +178,8 @@ async function getUser(guildId, userId) {
     `
     SELECT *
     FROM users
-    WHERE guild_id = $1 AND user_id = $2
+    WHERE guild_id = $1
+    AND user_id = $2
     `,
     [guildId, userId]
   );
@@ -168,12 +188,12 @@ async function getUser(guildId, userId) {
 }
 
 // =========================
-// READY
+// BOT LISTO
 // =========================
 
 client.once("ready", () => {
   console.log("=================================");
-  console.log(`🌸 Akari Bot conectado.`);
+  console.log("🌸 Akari Bot conectado.");
   console.log(`🤖 Usuario: ${client.user.tag}`);
   console.log(`🏠 Servidores: ${client.guilds.cache.size}`);
   console.log("=================================");
@@ -231,7 +251,7 @@ client.on("guildMemberAdd", async (member) => {
 });
 
 // =========================
-// MENSAJES
+// COMANDOS
 // =========================
 
 client.on("messageCreate", async (message) => {
@@ -264,40 +284,37 @@ client.on("messageCreate", async (message) => {
         .setColor(PINK)
         .setTitle("🌸 Akari Bot")
         .setDescription(
-          `Bienvenido/a a **Akari Bot** 🌸\n\n` +
-          `Usa los menús para explorar mis comandos.`
+          "Bienvenido/a a **Akari Bot** 🌸\n\n" +
+          "Estos son algunos de mis comandos."
         )
         .addFields(
           {
             name: "💰 Economía",
             value:
-              "`M!balance` `M!daily` `M!work` `M!pay` `M!shop`",
-            inline: false
+              "`M!balance` `M!daily` `M!work` `M!pay` `M!shop`"
           },
           {
             name: "🎮 Diversión",
             value:
-              "`M!coin` `M!dice` `M!guess`",
-            inline: false
+              "`M!coin` `M!dice` `M!guess`"
           },
           {
             name: "💗 Social",
             value:
-              "`M!profile` `M!hug` `M!friend` `M!rep`",
-            inline: false
+              "`M!profile` `M!hug` `M!friend` `M!rep`"
           },
           {
             name: "🛠️ Utilidades",
-            value:
-              "`M!ping`",
-            inline: false
+            value: "`M!ping`"
           }
         )
         .setFooter({
           text: "Akari Community 🌸"
         });
 
-      return message.reply({ embeds: [embed] });
+      return message.reply({
+        embeds: [embed]
+      });
     }
 
     // =========================
@@ -331,7 +348,9 @@ client.on("messageCreate", async (message) => {
           `${message.author}, tienes **${user.coins} monedas** 🌸`
         );
 
-      return message.reply({ embeds: [embed] });
+      return message.reply({
+        embeds: [embed]
+      });
     }
 
     // =========================
@@ -346,7 +365,10 @@ client.on("messageCreate", async (message) => {
 
       const now = Date.now();
 
-      if (user.daily && now - Number(user.daily) < 86400000) {
+      if (
+        user.daily &&
+        now - Number(user.daily) < 86400000
+      ) {
         const remaining =
           86400000 - (now - Number(user.daily));
 
@@ -372,7 +394,8 @@ client.on("messageCreate", async (message) => {
         UPDATE users
         SET coins = coins + $1,
             daily = $2
-        WHERE guild_id = $3 AND user_id = $4
+        WHERE guild_id = $3
+        AND user_id = $4
         `,
         [
           reward,
@@ -399,7 +422,10 @@ client.on("messageCreate", async (message) => {
 
       const now = Date.now();
 
-      if (user.work && now - Number(user.work) < 30000) {
+      if (
+        user.work &&
+        now - Number(user.work) < 30000
+      ) {
         const remaining =
           30000 - (now - Number(user.work));
 
@@ -418,7 +444,8 @@ client.on("messageCreate", async (message) => {
         UPDATE users
         SET coins = coins + $1,
             work = $2
-        WHERE guild_id = $3 AND user_id = $4
+        WHERE guild_id = $3
+        AND user_id = $4
         `,
         [
           reward,
@@ -485,7 +512,8 @@ client.on("messageCreate", async (message) => {
         `
         UPDATE users
         SET coins = coins - $1
-        WHERE guild_id = $2 AND user_id = $3
+        WHERE guild_id = $2
+        AND user_id = $3
         `,
         [
           amount,
@@ -498,7 +526,8 @@ client.on("messageCreate", async (message) => {
         `
         UPDATE users
         SET coins = coins + $1
-        WHERE guild_id = $2 AND user_id = $3
+        WHERE guild_id = $2
+        AND user_id = $3
         `,
         [
           amount,
@@ -516,23 +545,30 @@ client.on("messageCreate", async (message) => {
     // SHOP
     // =========================
 
-    if (command === "shop" || command === "tienda") {
+    if (
+      command === "shop" ||
+      command === "tienda"
+    ) {
       const embed = new EmbedBuilder()
         .setColor(PINK)
         .setTitle("🛍️ Tienda de Akari")
         .setDescription(
-          "Actualmente puedes consultar tus monedas con `M!balance`.\n\n" +
           "🌸 Próximamente habrá más objetos."
         );
 
-      return message.reply({ embeds: [embed] });
+      return message.reply({
+        embeds: [embed]
+      });
     }
 
     // =========================
     // COIN
     // =========================
 
-    if (command === "coin" || command === "flip") {
+    if (
+      command === "coin" ||
+      command === "flip"
+    ) {
       const choice =
         args[0]?.toLowerCase();
 
@@ -557,7 +593,8 @@ client.on("messageCreate", async (message) => {
           `
           UPDATE users
           SET coins = coins + 100
-          WHERE guild_id = $1 AND user_id = $2
+          WHERE guild_id = $1
+          AND user_id = $2
           `,
           [
             message.guild.id,
@@ -568,9 +605,11 @@ client.on("messageCreate", async (message) => {
 
       return message.reply(
         `🪙 Salió **${resultSide}**.\n` +
-        (won
-          ? "🎉 ¡Ganaste **100 monedas**!"
-          : "😔 Perdiste.")
+        (
+          won
+            ? "🎉 ¡Ganaste **100 monedas**!"
+            : "😔 Perdiste."
+        )
       );
     }
 
@@ -578,7 +617,10 @@ client.on("messageCreate", async (message) => {
     // DICE
     // =========================
 
-    if (command === "dice" || command === "dado") {
+    if (
+      command === "dice" ||
+      command === "dado"
+    ) {
       const result =
         Math.floor(Math.random() * 6) + 1;
 
@@ -612,7 +654,8 @@ client.on("messageCreate", async (message) => {
           `
           UPDATE users
           SET coins = coins + 250
-          WHERE guild_id = $1 AND user_id = $2
+          WHERE guild_id = $1
+          AND user_id = $2
           `,
           [
             message.guild.id,
@@ -652,7 +695,8 @@ client.on("messageCreate", async (message) => {
         `
         SELECT reputation
         FROM reputation
-        WHERE guild_id = $1 AND user_id = $2
+        WHERE guild_id = $1
+        AND user_id = $2
         `,
         [
           message.guild.id,
@@ -665,8 +709,12 @@ client.on("messageCreate", async (message) => {
 
       const embed = new EmbedBuilder()
         .setColor(PINK)
-        .setTitle(`🌸 Perfil de ${target.username}`)
-        .setThumbnail(target.displayAvatarURL())
+        .setTitle(
+          `🌸 Perfil de ${target.username}`
+        )
+        .setThumbnail(
+          target.displayAvatarURL()
+        )
         .addFields(
           {
             name: "💰 Monedas",
@@ -680,7 +728,9 @@ client.on("messageCreate", async (message) => {
           }
         );
 
-      return message.reply({ embeds: [embed] });
+      return message.reply({
+        embeds: [embed]
+      });
     }
 
     // =========================
@@ -735,16 +785,13 @@ client.on("messageCreate", async (message) => {
         );
       }
 
-      if (target.id === message.author.id) {
+      if (
+        target.id === message.author.id
+      ) {
         return message.reply(
           "❌ No puedes darte reputación a ti mismo."
         );
       }
-
-      await ensureUser(
-        message.guild.id,
-        target.id
-      );
 
       await pool.query(
         `
@@ -819,7 +866,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.ModerateMembers
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const target =
@@ -871,7 +920,8 @@ client.on("messageCreate", async (message) => {
         `
         SELECT reason, created_at
         FROM warnings
-        WHERE guild_id = $1 AND user_id = $2
+        WHERE guild_id = $1
+        AND user_id = $2
         ORDER BY created_at DESC
         `,
         [
@@ -889,8 +939,8 @@ client.on("messageCreate", async (message) => {
       const text = result.rows
         .slice(0, 10)
         .map(
-          (w, i) =>
-            `**${i + 1}.** ${w.reason}`
+          (warning, index) =>
+            `**${index + 1}.** ${warning.reason}`
         )
         .join("\n");
 
@@ -909,7 +959,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.ModerateMembers
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const target =
@@ -950,7 +1002,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.ModerateMembers
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const target =
@@ -979,7 +1033,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.KickMembers
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const target =
@@ -1016,7 +1072,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.BanMembers
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const target =
@@ -1053,7 +1111,9 @@ client.on("messageCreate", async (message) => {
           PermissionFlagsBits.ManageMessages
         )
       ) {
-        return message.reply("❌ No tienes permisos.");
+        return message.reply(
+          "❌ No tienes permisos."
+        );
       }
 
       const amount = Number(args[0]);
@@ -1073,9 +1133,10 @@ client.on("messageCreate", async (message) => {
         true
       );
 
-      const msg = await message.channel.send(
-        `🧹 Se eliminaron **${amount} mensajes**.`
-      );
+      const msg =
+        await message.channel.send(
+          `🧹 Se eliminaron **${amount} mensajes**.`
+        );
 
       setTimeout(() => {
         msg.delete().catch(() => {});
@@ -1085,9 +1146,12 @@ client.on("messageCreate", async (message) => {
     }
 
   } catch (error) {
-    console.error("❌ Error ejecutando comando:", error);
+    console.error(
+      "❌ Error ejecutando comando:",
+      error
+    );
 
-    return message.reply(
+    await message.reply(
       "❌ Ocurrió un error al ejecutar el comando."
     ).catch(() => {});
   }
@@ -1136,15 +1200,15 @@ client.on("interactionCreate", async (interaction) => {
       );
 
       for (const row of existing.rows) {
-        const channel =
+        const existingChannel =
           interaction.guild.channels.cache.get(
             row.channel_id
           );
 
-        if (channel) {
+        if (existingChannel) {
           return interaction.reply({
             content:
-              `❌ Ya tienes un ticket abierto: ${channel}`,
+              `❌ Ya tienes un ticket abierto: ${existingChannel}`,
             ephemeral: true
           });
         }
@@ -1162,7 +1226,8 @@ client.on("interactionCreate", async (interaction) => {
 
           permissionOverwrites: [
             {
-              id: interaction.guild.roles.everyone.id,
+              id:
+                interaction.guild.roles.everyone.id,
               deny: [
                 PermissionFlagsBits.ViewChannel
               ]
@@ -1194,7 +1259,9 @@ client.on("interactionCreate", async (interaction) => {
 
       const embed = new EmbedBuilder()
         .setColor(PINK)
-        .setTitle(`🌸 Ticket — ${categoryName}`)
+        .setTitle(
+          `🌸 Ticket — ${categoryName}`
+        )
         .setDescription(
           `Hola ${interaction.user} 🌸\n\n` +
           `Tu ticket ha sido creado correctamente.\n` +
@@ -1245,7 +1312,8 @@ client.on("interactionCreate", async (interaction) => {
 
       if (!result.rows.length) {
         return interaction.reply({
-          content: "❌ Este canal no es un ticket.",
+          content:
+            "❌ Este canal no es un ticket.",
           ephemeral: true
         });
       }
@@ -1263,7 +1331,9 @@ client.on("interactionCreate", async (interaction) => {
       );
 
       setTimeout(() => {
-        interaction.channel.delete().catch(() => {});
+        interaction.channel
+          .delete()
+          .catch(() => {});
       }, 1500);
     }
 
@@ -1306,7 +1376,9 @@ async function sendTicketPanel(channel) {
   const menu =
     new StringSelectMenuBuilder()
       .setCustomId("ticket_menu")
-      .setPlaceholder("Selecciona una categoría")
+      .setPlaceholder(
+        "Selecciona una categoría"
+      )
       .addOptions(
         {
           label: "Soporte",
@@ -1351,13 +1423,18 @@ async function sendTicketPanel(channel) {
 }
 
 // =========================
-// START
+// INICIAR BOT
 // =========================
 
 async function start() {
   try {
-    console.log("🌸 AKARI: entrando en start()...");
-    console.log("🌸 Conectando con PostgreSQL...");
+    console.log(
+      "🌸 AKARI: entrando en start()..."
+    );
+
+    console.log(
+      "🌸 Conectando con PostgreSQL..."
+    );
 
     await pool.query("SELECT 1");
 
@@ -1390,6 +1467,12 @@ async function start() {
   }
 }
 
-console.log("🌸 AKARI: llamando a start()...");
+// =========================
+// START
+// =========================
+
+console.log(
+  "🌸 AKARI: llamando a start()..."
+);
 
 start();

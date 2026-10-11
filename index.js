@@ -14,9 +14,9 @@ const {
 const { Pool } = require("pg");
 const http = require("http");
 
-// =========================
+// ==================================================
 // CONFIGURACIÓN
-// =========================
+// ==================================================
 
 const PREFIX = "M!";
 const PINK = 0xFF9DCC;
@@ -24,9 +24,9 @@ const PORT = process.env.PORT || 10000;
 
 console.log("🌸 AKARI: index.js se está ejecutando...");
 
-// =========================
+// ==================================================
 // SERVIDOR HTTP PARA RENDER
-// =========================
+// ==================================================
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, {
@@ -40,25 +40,25 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Servidor HTTP escuchando en el puerto ${PORT}`);
 });
 
-// =========================
+// ==================================================
 // VARIABLES DE ENTORNO
-// =========================
+// ==================================================
 
 if (!process.env.DISCORD_TOKEN) {
-  console.error("❌ Falta DISCORD_TOKEN en las variables de entorno.");
+  console.error("❌ Falta DISCORD_TOKEN.");
   process.exit(1);
 }
 
 if (!process.env.DATABASE_URL) {
-  console.error("❌ Falta DATABASE_URL en las variables de entorno.");
+  console.error("❌ Falta DATABASE_URL.");
   process.exit(1);
 }
 
 console.log("🌸 AKARI: variables de entorno encontradas.");
 
-// =========================
+// ==================================================
 // POSTGRESQL
-// =========================
+// ==================================================
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -76,9 +76,9 @@ pool.on("error", (error) => {
   console.error("❌ Error de PostgreSQL:", error.message);
 });
 
-// =========================
-// DISCORD CLIENT
-// =========================
+// ==================================================
+// DISCORD
+// ==================================================
 
 const client = new Client({
   intents: [
@@ -95,9 +95,9 @@ const client = new Client({
   ]
 });
 
-// =========================
+// ==================================================
 // BASE DE DATOS
-// =========================
+// ==================================================
 
 async function initDatabase() {
   console.log("🌸 Creando/verificando tablas...");
@@ -155,9 +155,9 @@ async function initDatabase() {
   console.log("✅ Tablas verificadas correctamente.");
 }
 
-// =========================
-// FUNCIONES DE USUARIO
-// =========================
+// ==================================================
+// USUARIOS
+// ==================================================
 
 async function ensureUser(guildId, userId) {
   await pool.query(
@@ -187,9 +187,9 @@ async function getUser(guildId, userId) {
   return result.rows[0];
 }
 
-// =========================
-// BOT LISTO
-// =========================
+// ==================================================
+// BOT READY
+// ==================================================
 
 client.once("ready", () => {
   console.log("=================================");
@@ -208,9 +208,9 @@ client.once("ready", () => {
   });
 });
 
-// =========================
+// ==================================================
 // BIENVENIDAS
-// =========================
+// ==================================================
 
 client.on("guildMemberAdd", async (member) => {
   try {
@@ -235,24 +235,25 @@ client.on("guildMemberAdd", async (member) => {
 
     if (!channel) return;
 
-    const message =
+    const welcomeMessage =
       settings.welcome_message ||
       `🌸 ¡Bienvenido/a ${member} a **${member.guild.name}**!`;
 
     await channel.send(
-      message
+      welcomeMessage
         .replace("{user}", `${member}`)
         .replace("{username}", member.user.username)
         .replace("{server}", member.guild.name)
     );
+
   } catch (error) {
     console.error("❌ Error en bienvenida:", error);
   }
 });
 
-// =========================
+// ==================================================
 // COMANDOS
-// =========================
+// ==================================================
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -275,9 +276,9 @@ client.on("messageCreate", async (message) => {
       message.author.id
     );
 
-    // =========================
+    // ==================================================
     // HELP
-    // =========================
+    // ==================================================
 
     if (command === "help" || command === "ayuda") {
       const embed = new EmbedBuilder()
@@ -305,7 +306,8 @@ client.on("messageCreate", async (message) => {
           },
           {
             name: "🛠️ Utilidades",
-            value: "`M!ping`"
+            value:
+              "`M!ping`"
           }
         )
         .setFooter({
@@ -317,9 +319,9 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // =========================
+    // ==================================================
     // PING
-    // =========================
+    // ==================================================
 
     if (command === "ping") {
       return message.reply(
@@ -327,9 +329,109 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
+    // ADMIN
+    // ==================================================
+
+    if (command === "admin") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.Administrator
+        )
+      ) {
+        return message.reply(
+          "❌ Este panel es únicamente para administradores."
+        );
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(PINK)
+        .setTitle("🌸 Panel de Administración")
+        .setDescription(
+          "Bienvenido al panel administrativo de **Akari Bot**.\n\n" +
+          "Selecciona una categoría en el menú de abajo."
+        )
+        .setFooter({
+          text: "Akari Community • Administración"
+        });
+
+      const menu =
+        new StringSelectMenuBuilder()
+          .setCustomId("admin_menu")
+          .setPlaceholder("Selecciona una categoría")
+          .addOptions(
+            {
+              label: "Moderación",
+              description:
+                "Comandos para moderar el servidor",
+              value: "admin_moderacion",
+              emoji: "🛡️"
+            },
+            {
+              label: "Tickets",
+              description:
+                "Administrar el sistema de tickets",
+              value: "admin_tickets",
+              emoji: "🎫"
+            },
+            {
+              label: "Configuración",
+              description:
+                "Configurar funciones de Akari",
+              value: "admin_config",
+              emoji: "⚙️"
+            },
+            {
+              label: "Economía",
+              description:
+                "Administrar la economía",
+              value: "admin_economia",
+              emoji: "💰"
+            },
+            {
+              label: "Información",
+              description:
+                "Información del bot y servidor",
+              value: "admin_info",
+              emoji: "📊"
+            }
+          );
+
+      const row =
+        new ActionRowBuilder()
+          .addComponents(menu);
+
+      return message.reply({
+        embeds: [embed],
+        components: [row]
+      });
+    }
+
+    // ==================================================
+    // TICKET PANEL
+    // ==================================================
+
+    if (command === "ticketpanel") {
+      if (
+        !message.member.permissions.has(
+          PermissionFlagsBits.Administrator
+        )
+      ) {
+        return message.reply(
+          "❌ Solo los administradores pueden crear el panel."
+        );
+      }
+
+      await sendTicketPanel(message.channel);
+
+      return message.reply(
+        "✅ Panel de tickets enviado."
+      );
+    }
+
+    // ==================================================
     // BALANCE
-    // =========================
+    // ==================================================
 
     if (
       command === "balance" ||
@@ -353,9 +455,9 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // =========================
+    // ==================================================
     // DAILY
-    // =========================
+    // ==================================================
 
     if (command === "daily") {
       const user = await getUser(
@@ -370,15 +472,16 @@ client.on("messageCreate", async (message) => {
         now - Number(user.daily) < 86400000
       ) {
         const remaining =
-          86400000 - (now - Number(user.daily));
+          86400000 -
+          (now - Number(user.daily));
 
-        const hours = Math.floor(
-          remaining / 3600000
-        );
+        const hours =
+          Math.floor(remaining / 3600000);
 
-        const minutes = Math.floor(
-          (remaining % 3600000) / 60000
-        );
+        const minutes =
+          Math.floor(
+            (remaining % 3600000) / 60000
+          );
 
         return message.reply(
           `⏰ Ya reclamaste tu recompensa diaria.\n` +
@@ -410,9 +513,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // WORK
-    // =========================
+    // ==================================================
 
     if (command === "work") {
       const user = await getUser(
@@ -427,7 +530,8 @@ client.on("messageCreate", async (message) => {
         now - Number(user.work) < 30000
       ) {
         const remaining =
-          30000 - (now - Number(user.work));
+          30000 -
+          (now - Number(user.work));
 
         return message.reply(
           `⏰ Debes esperar **${Math.ceil(
@@ -460,9 +564,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // PAY
-    // =========================
+    // ==================================================
 
     if (command === "pay") {
       const target =
@@ -541,9 +645,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // SHOP
-    // =========================
+    // ==================================================
 
     if (
       command === "shop" ||
@@ -561,9 +665,9 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // =========================
+    // ==================================================
     // COIN
-    // =========================
+    // ==================================================
 
     if (
       command === "coin" ||
@@ -613,9 +717,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // DICE
-    // =========================
+    // ==================================================
 
     if (
       command === "dice" ||
@@ -629,9 +733,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // GUESS
-    // =========================
+    // ==================================================
 
     if (command === "guess") {
       const number = Number(args[0]);
@@ -674,9 +778,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // PROFILE
-    // =========================
+    // ==================================================
 
     if (
       command === "profile" ||
@@ -733,9 +837,9 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // =========================
+    // ==================================================
     // HUG
-    // =========================
+    // ==================================================
 
     if (command === "hug") {
       const target =
@@ -752,9 +856,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // FRIEND
-    // =========================
+    // ==================================================
 
     if (command === "friend") {
       const target =
@@ -771,9 +875,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // REP
-    // =========================
+    // ==================================================
 
     if (command === "rep") {
       const target =
@@ -813,9 +917,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // SETWELCOME
-    // =========================
+    // ==================================================
 
     if (command === "setwelcome") {
       if (
@@ -856,9 +960,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // WARN
-    // =========================
+    // ==================================================
 
     if (command === "warn") {
       if (
@@ -904,9 +1008,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // WARNINGS
-    // =========================
+    // ==================================================
 
     if (
       command === "warnings" ||
@@ -949,9 +1053,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // TIMEOUT
-    // =========================
+    // ==================================================
 
     if (command === "timeout") {
       if (
@@ -992,9 +1096,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // UNTIMEOUT
-    // =========================
+    // ==================================================
 
     if (command === "untimeout") {
       if (
@@ -1023,9 +1127,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // KICK
-    // =========================
+    // ==================================================
 
     if (command === "kick") {
       if (
@@ -1062,9 +1166,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // BAN
-    // =========================
+    // ==================================================
 
     if (command === "ban") {
       if (
@@ -1101,9 +1205,9 @@ client.on("messageCreate", async (message) => {
       );
     }
 
-    // =========================
+    // ==================================================
     // CLEAR
-    // =========================
+    // ==================================================
 
     if (command === "clear") {
       if (
@@ -1157,15 +1261,172 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// =========================
+// ==================================================
 // INTERACCIONES
-// =========================
+// ==================================================
 
 client.on("interactionCreate", async (interaction) => {
   try {
-    // =========================
+
+    // ==================================================
+    // MENÚ ADMIN
+    // ==================================================
+
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === "admin_menu"
+    ) {
+
+      if (
+        !interaction.member.permissions.has(
+          PermissionFlagsBits.Administrator
+        )
+      ) {
+        return interaction.reply({
+          content:
+            "❌ No tienes permisos para utilizar este panel.",
+          ephemeral: true
+        });
+      }
+
+      let embed;
+
+      // -------------------------------
+      // MODERACIÓN
+      // -------------------------------
+
+      if (
+        interaction.values[0] ===
+        "admin_moderacion"
+      ) {
+        embed = new EmbedBuilder()
+          .setColor(PINK)
+          .setTitle("🛡️ Moderación")
+          .setDescription(
+            "**Comandos disponibles:**\n\n" +
+            "`M!warn @usuario razón` — Advertir\n" +
+            "`M!warnings @usuario` — Ver advertencias\n" +
+            "`M!timeout @usuario minutos` — Timeout\n" +
+            "`M!untimeout @usuario` — Quitar timeout\n" +
+            "`M!kick @usuario` — Expulsar\n" +
+            "`M!ban @usuario` — Banear\n" +
+            "`M!clear cantidad` — Eliminar mensajes"
+          );
+      }
+
+      // -------------------------------
+      // TICKETS
+      // -------------------------------
+
+      if (
+        interaction.values[0] ===
+        "admin_tickets"
+      ) {
+        embed = new EmbedBuilder()
+          .setColor(PINK)
+          .setTitle("🎫 Tickets")
+          .setDescription(
+            "**Sistema de tickets:**\n\n" +
+            "🛠️ Soporte\n" +
+            "🚨 Reporte\n" +
+            "❓ Duda\n" +
+            "🤝 Allys-Affys-Socio\n" +
+            "📝 Postulación\n" +
+            "📌 Otro\n\n" +
+            "**Comando:**\n" +
+            "`M!ticketpanel` — Crear panel de tickets"
+          );
+      }
+
+      // -------------------------------
+      // CONFIGURACIÓN
+      // -------------------------------
+
+      if (
+        interaction.values[0] ===
+        "admin_config"
+      ) {
+        embed = new EmbedBuilder()
+          .setColor(PINK)
+          .setTitle("⚙️ Configuración")
+          .setDescription(
+            "**Configuración disponible:**\n\n" +
+            "`M!setwelcome #canal` — Configurar bienvenida\n\n" +
+            "Más opciones próximamente."
+          );
+      }
+
+      // -------------------------------
+      // ECONOMÍA
+      // -------------------------------
+
+      if (
+        interaction.values[0] ===
+        "admin_economia"
+      ) {
+        embed = new EmbedBuilder()
+          .setColor(PINK)
+          .setTitle("💰 Economía")
+          .setDescription(
+            "**Sistema económico:**\n\n" +
+            "La economía está conectada a PostgreSQL.\n\n" +
+            "`M!balance`\n" +
+            "`M!daily`\n" +
+            "`M!work`\n" +
+            "`M!pay`\n" +
+            "`M!shop`"
+          );
+      }
+
+      // -------------------------------
+      // INFORMACIÓN
+      // -------------------------------
+
+      if (
+        interaction.values[0] ===
+        "admin_info"
+      ) {
+        embed = new EmbedBuilder()
+          .setColor(PINK)
+          .setTitle("📊 Información")
+          .addFields(
+            {
+              name: "🤖 Bot",
+              value: `${client.user}`,
+              inline: true
+            },
+            {
+              name: "🏠 Servidores",
+              value: `${client.guilds.cache.size}`,
+              inline: true
+            },
+            {
+              name: "👥 Miembros",
+              value: `${interaction.guild.memberCount}`,
+              inline: true
+            },
+            {
+              name: "🏓 Ping",
+              value: `${client.ws.ping}ms`,
+              inline: true
+            },
+            {
+              name: "🔧 Prefijo",
+              value: `\`${PREFIX}\``,
+              inline: true
+            }
+          );
+      }
+
+      return interaction.update({
+        embeds: [embed],
+        components: interaction.message.components
+      });
+    }
+
+    // ==================================================
     // MENÚ DE TICKETS
-    // =========================
+    // ==================================================
 
     if (
       interaction.isStringSelectMenu() &&
@@ -1185,6 +1446,10 @@ client.on("interactionCreate", async (interaction) => {
 
       const categoryName =
         names[category] || "Otro";
+
+      // ----------------------------------------------
+      // COMPROBAR TICKET EXISTENTE
+      // ----------------------------------------------
 
       const existing = await pool.query(
         `
@@ -1214,13 +1479,19 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
+      // ----------------------------------------------
+      // CREAR CANAL
+      // ----------------------------------------------
+
+      const safeUsername =
+        interaction.user.username
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "-")
+          .slice(0, 20);
+
       const channel =
         await interaction.guild.channels.create({
-          name:
-            `ticket-${interaction.user.username}`
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, "-")
-              .slice(0, 20),
+          name: `ticket-${safeUsername}`,
 
           type: ChannelType.GuildText,
 
@@ -1228,12 +1499,15 @@ client.on("interactionCreate", async (interaction) => {
             {
               id:
                 interaction.guild.roles.everyone.id,
+
               deny: [
                 PermissionFlagsBits.ViewChannel
               ]
             },
+
             {
               id: interaction.user.id,
+
               allow: [
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.SendMessages,
@@ -1242,6 +1516,10 @@ client.on("interactionCreate", async (interaction) => {
             }
           ]
         });
+
+      // ----------------------------------------------
+      // GUARDAR TICKET
+      // ----------------------------------------------
 
       await pool.query(
         `
@@ -1257,6 +1535,10 @@ client.on("interactionCreate", async (interaction) => {
         ]
       );
 
+      // ----------------------------------------------
+      // EMBED DEL TICKET
+      // ----------------------------------------------
+
       const embed = new EmbedBuilder()
         .setColor(PINK)
         .setTitle(
@@ -1267,7 +1549,14 @@ client.on("interactionCreate", async (interaction) => {
           `Tu ticket ha sido creado correctamente.\n` +
           `Un miembro del equipo te atenderá pronto.\n\n` +
           `**Categoría:** ${categoryName}`
-        );
+        )
+        .setFooter({
+          text: "Akari Community 🌸"
+        });
+
+      // ----------------------------------------------
+      // BOTÓN CERRAR
+      // ----------------------------------------------
 
       const closeButton =
         new ButtonBuilder()
@@ -1293,14 +1582,15 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // =========================
+    // ==================================================
     // CERRAR TICKET
-    // =========================
+    // ==================================================
 
     if (
       interaction.isButton() &&
       interaction.customId === "close_ticket"
     ) {
+
       const result = await pool.query(
         `
         SELECT *
@@ -1345,29 +1635,31 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!interaction.replied) {
       await interaction.reply({
-        content: "❌ Ocurrió un error.",
+        content:
+          "❌ Ocurrió un error.",
         ephemeral: true
       }).catch(() => {});
     }
   }
 });
 
-// =========================
-// PANEL DE TICKETS
-// =========================
+// ==================================================
+// FUNCIÓN: PANEL DE TICKETS
+// ==================================================
 
 async function sendTicketPanel(channel) {
+
   const embed = new EmbedBuilder()
     .setColor(PINK)
     .setTitle("🌸 Centro de Tickets")
     .setDescription(
       "Selecciona abajo el motivo de tu ticket.\n\n" +
-      "🛠️ Soporte\n" +
-      "🚨 Reporte\n" +
-      "❓ Duda\n" +
-      "🤝 Allys-Affys-Socio\n" +
-      "📝 Postulación\n" +
-      "📌 Otro"
+      "🛠️ **Soporte**\n" +
+      "🚨 **Reporte**\n" +
+      "❓ **Duda**\n" +
+      "🤝 **Allys-Affys-Socio**\n" +
+      "📝 **Postulación**\n" +
+      "📌 **Otro**"
     )
     .setFooter({
       text: "Akari Community 🌸"
@@ -1382,31 +1674,43 @@ async function sendTicketPanel(channel) {
       .addOptions(
         {
           label: "Soporte",
+          description:
+            "Necesitas ayuda con el servidor",
           value: "soporte",
           emoji: "🛠️"
         },
         {
           label: "Reporte",
+          description:
+            "Reportar a un usuario o problema",
           value: "reporte",
           emoji: "🚨"
         },
         {
           label: "Duda",
+          description:
+            "Resolver una duda",
           value: "duda",
           emoji: "❓"
         },
         {
           label: "Allys-Affys-Socio",
+          description:
+            "Alianzas, afiliaciones o socios",
           value: "alianza",
           emoji: "🤝"
         },
         {
           label: "Postulación",
+          description:
+            "Postularse al equipo",
           value: "postulacion",
           emoji: "📝"
         },
         {
           label: "Otro",
+          description:
+            "Otro motivo",
           value: "otro",
           emoji: "📌"
         }
@@ -1422,12 +1726,13 @@ async function sendTicketPanel(channel) {
   });
 }
 
-// =========================
-// INICIAR BOT
-// =========================
+// ==================================================
+// INICIAR
+// ==================================================
 
 async function start() {
   try {
+
     console.log(
       "🌸 AKARI: entrando en start()..."
     );
@@ -1457,6 +1762,7 @@ async function start() {
     );
 
   } catch (error) {
+
     console.error(
       "❌ NO SE PUDO INICIAR AKARI BOT:"
     );
@@ -1467,9 +1773,9 @@ async function start() {
   }
 }
 
-// =========================
+// ==================================================
 // START
-// =========================
+// ==================================================
 
 console.log(
   "🌸 AKARI: llamando a start()..."

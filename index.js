@@ -95,6 +95,7 @@ const hangmanGames = new Map();
 const triviaGames = new Map();
 const memoryGames = new Map();
 const tttGames = new Map();
+const activeGiveaways = new Map();
 
 // ======================================================
 // DATOS ANIME
@@ -565,6 +566,7 @@ async function createTables() {
       levels_channel TEXT,
       suggestions_channel TEXT,
       confessions_channel TEXT,
+      ratings_channel TEXT,
       antispam_enabled BOOLEAN DEFAULT TRUE,
       logs_channel TEXT,
       logs_enabled BOOLEAN DEFAULT TRUE
@@ -584,6 +586,11 @@ async function createTables() {
   await pool.query(`
     ALTER TABLE settings
     ADD COLUMN IF NOT EXISTS confessions_channel TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE settings
+    ADD COLUMN IF NOT EXISTS ratings_channel TEXT;
   `);
 
   await pool.query(`
@@ -885,7 +892,7 @@ async function antiSpam(message) {
           embeds: [
             embed(
               "🔇・Mute automático",
-              `${message.author} ha alcanzado **3 warns** y recibió un **mute de 1 hora** por acumulación de advertencias.`
+              `${message.author} ha alcanzado **3 warns** y recibido un **mute de 1 hora** por acumulación de advertencias.`
             )
           ]
         }).then(msg => {
@@ -1064,7 +1071,8 @@ Selecciona una categoría en el menú de abajo para ver los comandos disponibles
         content: text,
         allowedMentions: {
           parse: []
-        }
+        },
+        files: [...message.attachments.values()]
       });
     }
 
@@ -1099,7 +1107,8 @@ Selecciona una categoría en el menú de abajo para ver los comandos disponibles
             .setColor(color)
             .setDescription(text)
             .setTimestamp()
-        ]
+        ],
+        files: [...message.attachments.values()]
       });
     }
 
@@ -1692,6 +1701,80 @@ Selecciona una categoría en el menú de abajo para ver los comandos disponibles
     }
 
     // ==================================================
+    // COMANDOS DE APUESTAS (NUEVOS)
+    // ==================================================
+
+    if (["flipcoin", "apostar"].includes(command)) {
+      const amount = parseAmount(args[0]);
+      const choice = args[1]?.toLowerCase();
+
+      if (!amount || !["cara", "cruz"].includes(choice)) {
+        return message.reply(`❌ Usa: \`${PREFIX}apostar cantidad cara\` o \`${PREFIX}apostar cantidad cruz\``);
+      }
+
+      const user = await getUser(message.guild.id, message.author.id);
+
+      if (Number(user.coins) < amount) {
+        return message.reply("❌ No tienes suficiente dinero en efectivo para apostar.");
+      }
+
+      const win = Math.random() < 0.5;
+      const resultSide = win ? (Math.random() < 0.5 ? "cara" : "cruz") : (choice === "cara" ? "cruz" : "cara");
+      const won = resultSide === choice;
+
+      if (won) {
+        await addCoins(message.guild.id, message.author.id, amount);
+        return message.reply({
+          embeds: [embed("🪙・Apuesta Ganada", `La moneda cayó en **${resultSide}**.\n\n🎉 ¡Has ganado **${formatCoins(amount)}**!`)]
+        });
+      } else {
+        await pool.query(
+          `UPDATE users SET coins = GREATEST(0, coins - $1) WHERE guild_id = $2 AND user_id = $3`,
+          [amount, message.guild.id, message.author.id]
+        );
+        return message.reply({
+          embeds: [embed("🪙・Apuesta Perdida", `La moneda cayó en **${resultSide}**.\n\n😢 Has perdido **${formatCoins(amount)}**.`)]
+        });
+      }
+    }
+
+    if (["roll", "dados"].includes(command)) {
+      const amount = parseAmount(args[0]);
+
+      if (!amount) {
+        return message.reply(`❌ Usa: \`${PREFIX}dados cantidad\``);
+      }
+
+      const user = await getUser(message.guild.id, message.author.id);
+
+      if (Number(user.coins) < amount) {
+        return message.reply("❌ No tienes suficiente dinero en efectivo para apostar.");
+      }
+
+      const userRoll = Math.floor(Math.random() * 6) + 1;
+      const botRoll = Math.floor(Math.random() * 6) + 1;
+
+      if (userRoll > botRoll) {
+        await addCoins(message.guild.id, message.author.id, amount);
+        return message.reply({
+          embeds: [embed("🎲・Duelo de Dados", `Tus dados: **${userRoll}**\nDados de Akari: **${botRoll}**\n\n🎉 ¡Ganaste **${formatCoins(amount)}**!`)]
+        });
+      } else if (userRoll < botRoll) {
+        await pool.query(
+          `UPDATE users SET coins = GREATEST(0, coins - $1) WHERE guild_id = $2 AND user_id = $3`,
+          [amount, message.guild.id, message.author.id]
+        );
+        return message.reply({
+          embeds: [embed("🎲・Duelo de Dados", `Tus dados: **${userRoll}**\nDados de Akari: **${botRoll}**\n\n😢 Perdiste **${formatCoins(amount)}**.`)]
+        });
+      } else {
+        return message.reply({
+          embeds: [embed("🎲・Duelo de Dados", `Tus dados: **${userRoll}**\nDados de Akari: **${botRoll}**\n\n🤝 ¡Empate! No pierdes ni ganas nada.`)]
+        });
+      }
+    }
+
+    // ==================================================
     // SHOP
     // ==================================================
 
@@ -1764,12 +1847,12 @@ ${text}
       const type = args.shift()?.toLowerCase();
 
       if (type === "rol" || type === "role") {
-        const role = message.mentions.roles.first();
-        const price = parseAmount(args[1]);
+        const role = message.mentions.roles.first() || message.guild.roles.cache.get(args[0]);
+        const price = parseAmount(args[1] || args[0]);
 
         if (!role || !price) {
           return message.reply(
-            `❌ Usa: \`${PREFIX}shopadd rol @Rol cantidad\``
+            `❌ Usa: \`${PREFIX}shopadd rol @Rol cantidad\` o \`${PREFIX}shopadd rol ID_ROL cantidad\``
           );
         }
 
@@ -1801,7 +1884,7 @@ El rol fue añadido a la tienda.
         });
       }
 
-      if (type === "mensaje" || type === "message") {
+      if (type === "mensaje" || type === "message" || type === "item") {
         const price = parseAmount(args[args.length - 1]);
 
         if (!price) {
@@ -1820,7 +1903,7 @@ El rol fue añadido a la tienda.
           `
           INSERT INTO shop_items
           (guild_id, type, message, price)
-          VALUES ($1, 'message', $2, $3)
+          VALUES ($1, $2, $3)
           `,
           [
             message.guild.id,
@@ -1844,7 +1927,7 @@ El rol fue añadido a la tienda.
         });
       }
 
-      return message.reply("❌ Tipo inválido.");
+      return message.reply("❌ Tipo inválido. Usa `M!shopadd rol @rol precio` o `M!shopadd mensaje texto precio`.");
     }
 
     if (
@@ -1984,6 +2067,60 @@ El rol fue añadido a la tienda.
           ]
         });
       }
+    }
+
+    // ==================================================
+    // SORTEOS (NUEVO SISTEMA M!SORTEO)
+    // ==================================================
+
+    if (command === "sorteo") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const fullText = rawArguments.trim();
+      const matches = [...fullText.matchAll(/"([^"]+)"/g)].map(m => m[1]);
+
+      if (matches.length < 3) {
+        return message.reply(`❌ Usa el formato: \`${PREFIX}sorteo "Mensaje del sorteo" "Opción 1" "Opción 2" ...\``);
+      }
+
+      const title = matches[0];
+      const options = matches.slice(1, 11);
+
+      const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+      let desc = `${title}\n\n`;
+
+      options.forEach((opt, idx) => {
+        desc += `${emojis[idx]} **${opt}** — 0 votos (0%)\n`;
+      });
+
+      const row = new ActionRowBuilder();
+      const buttons = options.map((opt, idx) => {
+        return new ButtonBuilder()
+          .setCustomId(`giveaway_${idx}`)
+          .setLabel(opt.length > 20 ? opt.substring(0, 17) + "..." : opt)
+          .setEmoji(emojis[idx])
+          .setStyle(ButtonStyle.Secondary);
+      });
+
+      row.addComponents(buttons);
+
+      const msg = await message.channel.send({
+        embeds: [embed("🎉・Sorteo / Votación", desc)],
+        components: [row]
+      });
+
+      activeGiveaways.set(msg.id, {
+        title,
+        options,
+        votes: {},
+        counts: new Array(options.length).fill(0),
+        messageId: msg.id
+      });
+
+      await message.delete().catch(() => {});
+      return;
     }
 
     // ==================================================
@@ -3332,6 +3469,12 @@ Escribe tu respuesta en el chat.
               emoji: "🤫"
             },
             {
+              label: "Valoraciones",
+              description: "Configurar canal de valoraciones",
+              value: "ratings_admin",
+              emoji: "⭐"
+            },
+            {
               label: "Logs",
               description: "Configurar logs",
               value: "logs_admin",
@@ -3379,6 +3522,42 @@ Selecciona una sección en el menú para consultar los comandos disponibles.
         components: [
           new ActionRowBuilder()
             .addComponents(menu)
+        ]
+      });
+    }
+
+    // ==================================================
+    // SET RATINGS (VALORACIONES)
+    // ==================================================
+
+    if (command === "setratings" || command === "ratingset") {
+      if (!isAdmin(message.member)) {
+        return message.reply("❌ Solo administradores.");
+      }
+
+      const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
+
+      if (!channel) {
+        return message.reply(`❌ Usa: \`${PREFIX}setratings #canal\``);
+      }
+
+      await ensureSettings(message.guild.id);
+
+      await pool.query(
+        `
+        UPDATE settings
+        SET ratings_channel = $1
+        WHERE guild_id = $2
+        `,
+        [channel.id, message.guild.id]
+      );
+
+      return message.reply({
+        embeds: [
+          embed(
+            "⭐・Valoraciones",
+            `El canal de valoraciones de tickets ahora es ${channel}.`
+          )
         ]
       });
     }
@@ -3863,7 +4042,7 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
       await sendLog(
         message.guild,
         "🎫・Usuario añadido al ticket",
-        `${message.author} añadió a ${target} al ticket ${message.channel}.`
+        `${message.author} añadió a ${target} al ticket${message.channel}.`
       );
 
       return message.reply({
@@ -3924,7 +4103,7 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
       await sendLog(
         message.guild,
         "🎫・Usuario retirado del ticket",
-        `${message.author} retiró a ${target} del ticket ${message.channel}.`
+        `${message.author} retiró a ${target} del ticket${message.channel}.`
       );
 
       return message.reply({
@@ -4100,7 +4279,7 @@ Desde aquí podrás contactar directamente con nuestro equipo de staff para reso
       await sendLog(
         message.guild,
         "⚠️・Warn",
-        `${message.author} dio un warn a ${target}.\n\nRazón: ${reason}\nWarns: ${total}/3`
+        `${message.author} dio un warn a${target}.\n\nRazón: ${reason}\nWarns:${total}/3`
       );
 
       return message.reply({
@@ -4167,7 +4346,7 @@ ${
 
       result.rows.forEach(
         (row, index) => {
-          text += `**${index + 1}.** ${row.reason}\n`;
+          text += `**${index + 1}.**${row.reason}\n`;
         }
       );
 
@@ -4212,7 +4391,7 @@ ${
       await sendLog(
         message.guild,
         "🔇・Timeout",
-        `${message.author} aplicó timeout a ${target} durante ${minutes} minutos.`
+        `${message.author} aplicó timeout a ${target} durante${minutes} minutos.`
       );
 
       return message.reply({
@@ -4569,6 +4748,58 @@ client.on(
     try {
 
       // ==================================================
+      // GIVEAWAY / SORTEO BOTONES
+      // ==================================================
+
+      if (
+        interaction.isButton() &&
+        interaction.customId.startsWith("giveaway_")
+      ) {
+        const giveaway = activeGiveaways.get(interaction.message.id);
+        if (!giveaway) {
+          return interaction.reply({ content: "❌ Este sorteo / votación ya ha expirado o no está activo.", ephemeral: true });
+        }
+
+        const optionIndex = parseInt(interaction.customId.split("_")[1]);
+        const userId = interaction.user.id;
+
+        const previousVote = giveaway.votes[userId];
+        if (previousVote !== undefined) {
+          giveaway.counts[previousVote]--;
+        }
+
+        giveaway.votes[userId] = optionIndex;
+        giveaway.counts[optionIndex]++;
+
+        const totalVotes = giveaway.counts.reduce((a, b) => a + b, 0);
+        const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+        let desc = `${giveaway.title}\n\n`;
+
+        giveaway.options.forEach((opt, idx) => {
+          const count = giveaway.counts[idx];
+          const percent = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+          desc += `${emojis[idx]} **${opt}** — ${count} votos (${percent}%)\n`;
+        });
+
+        const row = new ActionRowBuilder();
+        const buttons = giveaway.options.map((opt, idx) => {
+          return new ButtonBuilder()
+            .setCustomId(`giveaway_${idx}`)
+            .setLabel(opt.length > 20 ? opt.substring(0, 17) + "..." : opt)
+            .setEmoji(emojis[idx])
+            .setStyle(ButtonStyle.Secondary);
+        });
+        row.addComponents(buttons);
+
+        await interaction.update({
+          embeds: [embed("🎉・Sorteo / Votación", desc)],
+          components: [row]
+        });
+
+        return;
+      }
+
+      // ==================================================
       // HELP MENU
       // ==================================================
 
@@ -4598,6 +4829,8 @@ client.on(
 \`${PREFIX}shop\`
 \`${PREFIX}buy\`
 \`${PREFIX}bj\`
+\`${PREFIX}apostar cantidad cara/cruz\`
+\`${PREFIX}dados cantidad\`
 `;
         }
 
@@ -4752,6 +4985,7 @@ client.on(
 🎫 Al cerrar:
 • Motivo
 • Transcript
+• Valoración de 1 a 5 estrellas
 • Registro en logs
 
 Categorías:
@@ -4775,6 +5009,7 @@ Categorías:
 \`${PREFIX}setlevels #canal\`
 \`${PREFIX}setsuggestions #canal\`
 \`${PREFIX}setconfessions #canal\`
+\`${PREFIX}setratings #canal\`
 \`${PREFIX}setlogs #canal\`
 `;
         }
@@ -4834,6 +5069,19 @@ Configura el canal donde se publicarán las sugerencias.
 \`${PREFIX}setconfessions #canal\`
 
 Configura el canal de confesiones anónimas.
+`;
+        }
+
+        if (
+          interaction.values[0] ===
+          "ratings_admin"
+        ) {
+          title = "⭐・Valoraciones";
+
+          description = `
+\`${PREFIX}setratings #canal\`
+
+Configura el canal público donde se publicarán las estrellas y valoraciones de los tickets.
 `;
         }
 
@@ -5235,33 +5483,25 @@ ${data.content}
             );
 
         const ticketText = `
-🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
-🎫・TICKET ABIERTO
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+       🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
+          🎫・TICKET ABIERTO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
 
-¡Bienvenido/a a tu ticket! 💗
+🌸 ¡Bienvenido/a, <@${interaction.user.id}>!
 
-Tu solicitud ha sido creada correctamente.
+Nos alegra mucho poder ayudarte. 💗
 
-📂 Categoría
-${category}
+📂 Categoría: **${category}**
 
-📝 Describe con detalle el motivo de tu ticket para que nuestro equipo pueda ayudarte de la mejor manera posible.
+📌 Por favor, describe detalladamente tu situación o duda para que nuestro equipo pueda atenderte de la mejor manera.
 
-━━━━━━━━━━━━━━━━━━━━
+✨・Aquí podrás:
+> 💬 Conversar con el staff de forma privada.
+> 📌 Aportar pruebas o capturas si es necesario.
+> 🔒 Cerrar el ticket cuando esté resuelto.
 
-📌・RECUERDA
-
-✦ Sé claro con tu solicitud.
-✦ Mantén el respeto en todo momento.
-✦ Si tienes pruebas, envíalas aquí.
-✦ No hagas menciones innecesarias al staff.
-✦ Ten paciencia mientras atendemos tu solicitud.
-
-🌸 Un miembro de nuestro equipo te atenderá lo antes posible.
-
-🔒 Cuando tu solicitud haya sido solucionada, utiliza el botón de abajo para cerrar el ticket.
-
-💗 Gracias por contactar con Akari Community.
+💗 Gracias por formar parte de **Akari Community**.
 `;
 
         await channel.send({
@@ -5269,7 +5509,7 @@ ${category}
             `<@${interaction.user.id}> <@&${STAFF_ROLE_ID}>`,
           embeds: [
             embed(
-              "🎫・Ticket abierto",
+              "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
               ticketText
             )
           ],
@@ -5473,7 +5713,7 @@ ${category}
           embeds: [
             embed(
               "🔒・Cerrando ticket",
-              "Preparando el transcript y cerrando el ticket..."
+              "Preparando el transcript, guardando registros y enviando panel de valoración..."
             )
           ]
         });
@@ -5577,6 +5817,116 @@ ${reason}
               ],
               files: [attachment]
             });
+          }
+
+          const ticketOwner = await interaction.guild.members.fetch(ticket.user_id).catch(() => null);
+          if (ticketOwner) {
+            const ratingRow = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`rate_1_${ticket.user_id}`).setLabel("1 ⭐").setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId(`rate_2_${ticket.user_id}`).setLabel("2 ⭐").setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId(`rate_3_${ticket.user_id}`).setLabel("3 ⭐").setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`rate_4_${ticket.user_id}`).setLabel("4 ⭐").setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`rate_5_${ticket.user_id}`).setLabel("5 ⭐").setStyle(ButtonStyle.Success)
+            );
+
+            const ratingMsg = await ticketOwner.send({
+              embeds: [
+                embed(
+                  "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
+                  `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+       🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
+          ⭐・VALORA TU TICKET
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+🌸 ¡Hola, ${ticketOwner}!
+
+Tu ticket en **${interaction.guild.name}** ha sido cerrado correctamente. 💗
+
+Por favor, tómate un momento para valorar la atención recibida utilizando los botones de abajo (de 1 a 5 estrellas).
+
+⚠️ *Nota: Esta solicitud de valoración expira en 5 minutos si no se responde.*
+`
+                )
+              ],
+              components: [ratingRow]
+            }).catch(() => null);
+
+            if (ratingMsg) {
+              const filter = i => i.user.id === ticket.user_id;
+              const collector = ratingMsg.createMessageComponentCollector({ filter, time: 300000, max: 1 });
+
+              collector.on('collect', async i => {
+                const stars = i.customId.split("_")[1];
+                const starEmojis = "⭐".repeat(Number(stars));
+
+                await i.update({
+                  embeds: [
+                    embed(
+                      "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
+                      `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+       🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
+          💗・¡GRACIAS!
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+🌸 Tu valoración de **${stars} estrellas (${starEmojis})** ha sido registrada con éxito.
+
+¡Gracias por ayudarnos a mejorar cada día! ✨
+`
+                    )
+                  ],
+                  components: []
+                });
+
+                const settingsRes = await pool.query(`SELECT ratings_channel FROM settings WHERE guild_id = $1`, [interaction.guild.id]);
+                const ratingsChannelId = settingsRes.rows[0]?.ratings_channel;
+                if (ratingsChannelId) {
+                  const ratingsChan = interaction.guild.channels.cache.get(ratingsChannelId);
+                  if (ratingsChan) {
+                    const ratingCard = `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+       🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮
+          ⭐・NUEVA VALORACIÓN
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuario: <@${ticket.user_id}>
+📂 Categoría: **${ticket.category}**
+👮 Atendido por: ${interaction.user}
+
+⭐ Estrellas otorgadas: **${stars} / 5**
+${starEmojis}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💗 Gracias por confiar en nuestro equipo y formar parte de **Akari Community**.
+`;
+                    await ratingsChan.send({
+                      embeds: [
+                        embed(
+                          "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
+                          ratingCard
+                        )
+                      ]
+                    });
+                  }
+                }
+              });
+
+              collector.on('end', async collected => {
+                if (collected.size === 0) {
+                  await ratingMsg.edit({
+                    embeds: [
+                      embed(
+                        "🌸・𝘼𝙠𝙖𝙧𝙞 𝘾𝙤𝙢𝙢𝙪𝙣𝙞𝙩𝙮",
+                        "⏰ El tiempo para valorar este ticket ha expirado. ¡Gracias de todos modos por usar nuestro sistema!"
+                      )
+                    ],
+                    components: []
+                  }).catch(() => {});
+                }
+              });
+            }
           }
 
           await pool.query(
